@@ -74,6 +74,29 @@ struct Game {
     Event warnedFor = Event::None;
     bool menu = false;   // start screen: Daily / New world
     size_t logSeen = 0; std::string logText; uint64_t logAt = 0;
+    // Build menu unlocks: start with the basics, open the next step of a chain once it's useful.
+    bool unlocked[(int)BType::Count] = {}, fresh[(int)BType::Count] = {};
+    void updateUnlocks(bool quiet) {
+        const World& w = *world;
+        auto want = [&](BType t) {
+            switch (t) {
+            case BType::House: case BType::Farm: case BType::Fisher: case BType::Lumber: return true;
+            case BType::Mill: return w.store[(int)Res::Wheat] > 0 || w.count(BType::Mill) > 0;
+            case BType::Bakery: return w.store[(int)Res::Flour] > 0 || w.count(BType::Bakery) > 0;
+            case BType::Sawmill: return w.count(BType::Lumber) > 0 || w.count(BType::Sawmill) > 0;
+            case BType::Well: return w.day() >= 3 || w.count(BType::Well) > 0;
+            case BType::Healer: return w.day() >= 8 || w.sickCount() > 0 || w.pending == Event::Plague || w.count(BType::Healer) > 0;
+            case BType::Tower: return w.day() >= 8 || w.raidersAlive() > 0 || w.pending == Event::Raiders || w.count(BType::Tower) > 0;
+            default: return false;
+            }
+        };
+        for (int i = 1; i < (int)BType::Count; i++)
+            if (!unlocked[i] && want((BType)i)) {
+                unlocked[i] = true;
+                if (!quiet) { fresh[i] = true; say(std::string("New building: ") + shortName((BType)i)); }
+            }
+    }
+    bool anyFresh() const { for (bool f : fresh) if (f) return true; return false; }
     float zoom = 2; float camX = 0, camY = 0;
     int scrW = 270, scrH = 585;
     int viewY = 0, viewW = 270, viewH = 400;   // map viewport between the top bar and the drawer
@@ -122,7 +145,9 @@ struct Game {
         camX = wx - lx / zoom; camY = wy - (ly - viewY) / zoom; clampCam();
     }
     void cycleSpeed() { if (paused) { paused = false; speed = 1; } else if (speed >= 8) paused = true; else speed *= 2; }
-    void restart(uint32_t s, bool isDaily = false) { seed = s; daily = isDaily; warnedFor = Event::None; menu = false; world = std::make_unique<World>(s, true); bestSaved = false; cancelTool(); tab = -1; centerOnHall(); }
+    void restart(uint32_t s, bool isDaily = false) { seed = s; daily = isDaily; warnedFor = Event::None; menu = false; world = std::make_unique<World>(s, true);
+        for (int i = 0; i < (int)BType::Count; i++) unlocked[i] = fresh[i] = false;
+        updateUnlocks(true); bestSaved = false; cancelTool(); tab = -1; centerOnHall(); }
     void say(const std::string& s) { toast = s; toastUntil = SDL_GetTicks() + 2500; }
     void cancelTool() { tool = Tool::None; ghostSet = false; roadDrag.clear(); painting = false; remX = remY = -1; }
     void startPlace(BType t) {
@@ -262,9 +287,15 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
     // ---- bottom drawer (built from the bottom up)
     float bottom = (float)g.scrH - g.safeBottom;
     float tabsY = bottom - btnH - pad;
-    std::vector<BType> cards = g.tab >= 0 ? tabItems(g.tab) : std::vector<BType>{};
-    float cardH = 34.f;
-    float cardsY = tabsY - (cards.empty() ? 0.f : cardH + pad);
+    // Build opens one grid, ordered along the chains; only unlocked buildings show
+    std::vector<BType> cards;
+    if (g.tab >= 0)
+        for (BType t : {BType::House, BType::Farm, BType::Mill, BType::Bakery, BType::Fisher, BType::Lumber, BType::Sawmill, BType::Well, BType::Healer, BType::Tower})
+            if (g.unlocked[(int)t]) cards.push_back(t);
+    const int cols = 4;
+    float cardH = 34.f, cardW = (g.scrW - pad * (cols + 1)) / cols;
+    int cardRows = ((int)cards.size() + cols - 1) / cols;
+    float cardsY = tabsY - (cards.empty() ? 0.f : cardRows * (cardH + pad));
     bool confirmRow = g.tool != Tool::None || g.selected >= 0;
     float confY = cardsY - (confirmRow ? btnH + pad : 0.f);
     float drawerTop = confY - pad;
@@ -272,32 +303,35 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
         rect(ren, 0, drawerTop, (float)g.scrW, (float)g.scrH - drawerTop, UI_BG, 235);
         rect(ren, 0, drawerTop, (float)g.scrW, 1, 0x5d4b62);
     }
-    // tabs: 4 categories + Road + Remove, equal widths, thumb height
+    // three big buttons: Build, Road, Remove
     {
-        int n = 6; float tw = (g.scrW - pad * (n + 1)) / n;
+        int n = 3; float tw = (g.scrW - pad * (n + 1)) / n;
+        static const char* names[3] = {"Build", "Road", "Remove"};
         for (int i = 0; i < n; i++) {
             SDL_FRect b{pad + i * (tw + pad), tabsY, tw, btnH};
-            int id = i < 4 ? B_TAB0 + i : (i == 4 ? B_ROAD : B_REMOVE);
+            int id = i == 0 ? B_TAB0 : (i == 1 ? B_ROAD : B_REMOVE);
             g.btns.push_back({b, id});
             if (!draw) continue;
-            bool sel = (i < 4 && g.tab == i) || (i == 4 && g.tool == Tool::Road) || (i == 5 && g.tool == Tool::Remove);
-            uint32_t acc = i < 4 ? TAB_COL[i] : (i == 4 ? 0xa77b5b : UI_BAD);
+            bool sel = (i == 0 && g.tab >= 0) || (i == 1 && g.tool == Tool::Road) || (i == 2 && g.tool == Tool::Remove);
+            uint32_t acc = i == 0 ? UI_GOOD : (i == 1 ? 0xa77b5b : UI_BAD);
             button(ren, b, sel ? UI_SEL : UI_PANEL, sel, acc);
-            rect(ren, b.x + 3, b.y + 3, 4, 4, acc);   // colour key matching the roofs
-            centered(ren, b, b.y + 11, sel ? UI_TEXT : UI_DIM, i < 4 ? tabName(i) : (i == 4 ? "Road" : "Del"));
+            centered(ren, b, b.y + 11, sel ? UI_TEXT : UI_DIM, names[i]);
+            if (i == 0 && g.anyFresh()) rect(ren, b.x + b.w - 8, b.y + 4, 4, 4, UI_WARN);   // something new to build
         }
     }
     // building cards
     if (!cards.empty()) {
-        int n = (int)cards.size(); float cw = std::min(90.f, (g.scrW - pad * (n + 1)) / n);
+        int n = (int)cards.size();
         for (int i = 0; i < n; i++) {
-            SDL_FRect b{pad + i * (cw + pad), cardsY, cw, cardH};
+            SDL_FRect b{pad + (i % cols) * (cardW + pad), cardsY + (i / cols) * (cardH + pad), cardW, cardH};
+            uint32_t stripe = TAB_COL[(int)binfo(cards[i]).cat];
             g.btns.push_back({b, B_CARD0 + (int)cards[i]});
             if (!draw) continue;
             bool afford = w.canAfford(cards[i]);
             bool sel = g.tool == Tool::Place && g.placing == cards[i];
-            button(ren, b, sel ? UI_SEL : UI_PANEL, sel, TAB_COL[g.tab]);
-            rect(ren, b.x + 3, b.y + 3, b.w - 6, 3, afford ? TAB_COL[g.tab] : 0x45394a);
+            button(ren, b, sel ? UI_SEL : UI_PANEL, sel, stripe);
+            rect(ren, b.x + 3, b.y + 3, b.w - 6, 2, afford ? stripe : 0x45394a);
+            if (g.fresh[(int)cards[i]]) rect(ren, b.x + b.w - 7, b.y + 6, 4, 4, UI_WARN);
             centered(ren, b, b.y + 10, afford ? UI_TEXT : 0x6d5f70, shortName(cards[i]));
             {   // cost as icons: log + number, plank + number
                 const BInfo& in = binfo(cards[i]);
@@ -519,10 +553,10 @@ static void pressButton(Game& g, int id) {
     else if (id == B_RESTART) g.restart(g.daily ? todaySeed() + 7919u * (uint32_t)SDL_GetTicks() : g.seed + 1);
     else if (id == B_DAILY) g.restart(todaySeed(), true);
     else if (id == B_PLAY) g.menu = false;
-    else if (id >= B_TAB0 && id < B_TAB0 + 4) { g.tab = g.tab == id - B_TAB0 ? -1 : id - B_TAB0; if (g.tool != Tool::Place) g.cancelTool(); }
+    else if (id >= B_TAB0 && id < B_TAB0 + 4) { g.tab = g.tab >= 0 ? -1 : 0; if (g.tool != Tool::Place) g.cancelTool(); }
     else if (id == B_ROAD) { bool on = g.tool == Tool::Road; g.cancelTool(); g.selected = -1; if (!on) { g.tool = Tool::Road; g.tab = -1; } }
     else if (id == B_REMOVE) { bool on = g.tool == Tool::Remove; g.cancelTool(); g.selected = -1; if (!on) { g.tool = Tool::Remove; g.tab = -1; } }
-    else if (id >= B_CARD0 && id < B_CARD0 + (int)BType::Count) g.startPlace((BType)(id - B_CARD0));
+    else if (id >= B_CARD0 && id < B_CARD0 + (int)BType::Count) { g.fresh[id - B_CARD0] = false; g.startPlace((BType)(id - B_CARD0)); }
     else if (id == B_CANCEL) { g.cancelTool(); g.selected = -1; }
     else if (id == B_OK) {
         if (g.tool == Tool::Place) g.confirmPlace();
@@ -687,6 +721,7 @@ int main(int argc, char** argv) {
             for (int t = 0; t < TICKS_PER_DAY && !w.gameOver(); t++) w.tick();
         }
         for (int t = 0; t < TICKS_PER_DAY / 3 && !w.gameOver(); t++) w.tick();   // midday light
+        g.updateUnlocks(true);
         if (shotUi == "menu") g.menu = true;
         if (shotUi == "warn") { w.pending = Event::Raiders; w.pendingTicks = 50; w.pendingSide = -1; }
         if (shotUi == "warn2") { w.pending = Event::Wildfire; w.pendingTicks = 60; w.pendingSide = 0; }
@@ -774,6 +809,7 @@ int main(int argc, char** argv) {
             if (g.world->day() > best) { best = g.world->day(); saveBest(best, g.daily); }
             g.bestSaved = true;
         }
+        g.updateUnlocks(false);
         if (g.world->pending != g.warnedFor) {   // a new warning: slow down so there's time to react
             if (g.world->pending != Event::None && g.speed > 1) g.speed = 1;
             g.warnedFor = g.world->pending;

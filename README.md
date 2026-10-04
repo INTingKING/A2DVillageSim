@@ -21,15 +21,16 @@ There are no god powers: wells, healers and watchtowers are your only protection
 - **It gets harder:** disasters come more often and hit harder as the days pass, and after day 35 a second one can arrive in the afternoon. Every town falls eventually.
 - **The town's story:** when your town falls, the game-over screen tells its story day by day: founding, key buildings, growth, winters survived, the disasters that hit hardest, and the end.
 - **Daily run:** the start screen has a big Daily button (also on the game-over screen, or `--daily`). It starts today's world, the same for everyone on the same UTC date, with its own best score. The sim uses its own random-number mapping so desktop and phone builds generate the same world from one seed.
-- Roof colours follow the drawer tabs: red-brown homes, straw food, green-brown wood, slate safety.
+- Roof colours match the stripe on each build card: red-brown homes, straw food, green-brown wood, slate safety.
+- Buildings unlock as you go: a new world offers house, farm, fisher and lumber camp. The mill appears once you have wheat, the bakery once you have flour, the sawmill once you have a lumber camp, the well on day 3, and the healer and tower on day 8 or as soon as sickness or raiders show up. New cards get a small yellow dot.
 
 ## Controls
 
 Portrait-only on a 64×120 tile map; the layout adapts to any phone size (whole-number pixel scale, short side about 270 game pixels, safe-area aware).
 
-**Touch:** the build drawer sits at the bottom. Tabs are Home, Food, Wood, Guard, Road and Del. Pick a tab, tap a building card (greyed out when you can't afford it),
+**Touch:** the build drawer sits at the bottom. It has three buttons: Build, Road and Remove. Build opens one grid of cards ordered along the production chains; tap a card (greyed out when you can't afford it),
 drag the see-through ghost (it floats above your thumb, green where it fits and red where it doesn't), then press **Build** or **Cancel**.
-With **Road** selected, drag to draw a road; the live cost shows while you drag. With **Del** selected, tap a building or road, then tap again or press Remove (half refund).
+With **Road** selected, drag to draw a road; the live cost shows while you drag. With **Remove** selected, tap a building or road, then tap again or press Remove (half refund).
 With no tool selected, one finger pans and a tap shows a building's status. Two fingers always pan and pinch-zoom.
 Arrows at the screen edge point to off-screen fire (orange), plague (green) and raiders (red). The game pauses when the app goes to the background.
 
