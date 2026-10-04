@@ -402,10 +402,16 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         cv.rect(tx + 6, y - 9, 6, 3, 0xf9c22b); cv.rect(tx + 6 + 2 * wave, y - 7, 4, 1, 0xfbb954);
         window(cv, x + 7, y + 32, night); window(cv, x + W - 13, y + 32, night);
         door(cv, x + W / 2 - 3, y + H - 10, 8);
-        // the town's store: start stock and anything no producer is holding
-        logPile(cv, x + 2, y + H, pileLevel(w, Res::Logs, 1 + w.count(BType::Lumber), 3.f, 6));
-        plankPile(cv, x + W - 15, y + H - 1, pileLevel(w, Res::Planks, 1 + w.count(BType::Sawmill), 4.f, 4), 10);
-        if (w.food() > 0.05f) crate(cv, x + 12, y + H - 1, std::min(5, (int)std::ceil(w.food() / std::max(1, 1 + w.count(BType::Bakery) + w.count(BType::Fisher)) / 8.f)), w.store[(int)Res::Fish] > w.store[(int)Res::Bread]);
+        // the town's store, in fixed steps you can learn: 1 log per 10, 1 board per 10, 1 food per 20.
+        // A pile at its cap sparkles: there is more than it can show.
+        auto sparkle = [&](int sx, int sy) { if ((frame / 6 + seed) % 4 == 0) { cv.put(sx, sy, 0xffffff); cv.put(sx - 1, sy, LIT); cv.put(sx + 1, sy, LIT); cv.put(sx, sy - 1, LIT); cv.put(sx, sy + 1, LIT); } };
+        float lg = w.store[(int)Res::Logs], pl = w.store[(int)Res::Planks], fd = w.food();
+        logPile(cv, x + 2, y + H, std::min(6, (int)std::ceil(lg / 10.f)));
+        if (lg > 60.f) sparkle(x + 8, y + H - 12);
+        plankPile(cv, x + W - 15, y + H - 1, std::min(4, (int)std::ceil(pl / 10.f)), 10);
+        if (pl > 40.f) sparkle(x + W - 6, y + H - 11);
+        if (fd > 0.05f) crate(cv, x + 12, y + H - 1, std::min(6, (int)std::ceil(fd / 20.f)), w.store[(int)Res::Fish] > w.store[(int)Res::Bread]);
+        if (fd > 120.f) sparkle(x + 17, y + H - 10);
         break;
     }
     case BType::House: {

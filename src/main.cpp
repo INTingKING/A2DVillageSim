@@ -296,7 +296,23 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
     int cardRows = ((int)cards.size() + cols - 1) / cols;
     float cardsY = tabsY - (cards.empty() ? 0.f : cardRows * (cardH + pad));
     bool confirmRow = g.tool != Tool::None || g.selected >= 0;
-    float confY = cardsY - (confirmRow ? btnH + pad : 0.f);
+    // tapping a building that holds goods shows exact numbers in a small row above Close
+    struct Stock { int icon; const char* label; float v; };
+    std::vector<Stock> stock;
+    if (g.tool == Tool::None && g.selected >= 0) {
+        switch (w.buildings[g.selected].type) {
+        case BType::Hall: stock = {{2, nullptr, w.store[(int)Res::Logs]}, {3, nullptr, w.store[(int)Res::Planks]}, {-1, "Bread", w.store[(int)Res::Bread]}, {-1, "Fish", w.store[(int)Res::Fish]}}; break;
+        case BType::Lumber: stock = {{2, nullptr, w.store[(int)Res::Logs]}}; break;
+        case BType::Sawmill: stock = {{2, nullptr, w.store[(int)Res::Logs]}, {3, nullptr, w.store[(int)Res::Planks]}}; break;
+        case BType::Farm: stock = {{-1, "Wheat", w.store[(int)Res::Wheat]}}; break;
+        case BType::Mill: stock = {{-1, "Wheat", w.store[(int)Res::Wheat]}, {-1, "Flour", w.store[(int)Res::Flour]}}; break;
+        case BType::Bakery: stock = {{-1, "Flour", w.store[(int)Res::Flour]}, {-1, "Bread", w.store[(int)Res::Bread]}}; break;
+        case BType::Fisher: stock = {{-1, "Fish", w.store[(int)Res::Fish]}}; break;
+        default: break;
+        }
+    }
+    float stockH = stock.empty() ? 0.f : 16.f;
+    float confY = cardsY - (confirmRow ? btnH + pad : 0.f) - stockH;
     float drawerTop = confY - pad;
     if (draw) {
         rect(ren, 0, drawerTop, (float)g.scrW, (float)g.scrH - drawerTop, UI_BG, 235);
@@ -378,6 +394,15 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
             showOk = false;
         }
         if (draw) text(ren, pad, confY + 10, scol, status);
+        if (draw && !stock.empty()) {
+            float sx = pad, sy = confY + btnH + pad;
+            for (auto& st : stock) {
+                std::string n = std::to_string((int)st.v);
+                if (st.icon >= 0) { statIcon(ren, sx, sy, st.icon); sx += 11; }
+                else { text(ren, sx, sy + 1, UI_DIM, st.label); sx += 8.f * std::strlen(st.label) + 4; }
+                text(ren, sx, sy + 1, UI_TEXT, n); sx += 8.f * n.size() + 12;
+            }
+        }
         if (g.tool != Tool::None || g.selected >= 0) {
             g.btns.push_back({no, B_CANCEL});
             if (draw) { button(ren, no, UI_PANEL, false, 0); centered(ren, no, no.y + 10, UI_DIM, g.tool == Tool::None ? "Close" : "Cancel"); }
@@ -736,6 +761,8 @@ int main(int argc, char** argv) {
         } else if (shotUi == "road") {
             g.tool = Tool::Road;
             for (int i = 0; i < 8; i++) g.addRoadTile(w.hallX + 4 + i, w.hallY + 8);
+        } else if (shotUi == "hall") {
+            for (int i = 0; i < (int)w.buildings.size(); i++) if (w.buildings[i].alive && w.buildings[i].type == BType::Hall) g.selected = i;
         } else if (shotUi == "info") {
             g.tab = 1;
             for (int i = 0; i < (int)w.buildings.size(); i++) if (w.buildings[i].alive && w.buildings[i].type == BType::Mill) g.selected = i;
