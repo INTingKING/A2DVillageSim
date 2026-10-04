@@ -5,9 +5,17 @@ Your villagers farm, chop wood, build houses and raise kids on their own. The wo
 droughts, plagues, wildfires, raiders, locusts and blizzards at them, more often the longer you survive.
 You spend mana on four powers to keep them going. Your score is the number of days your civilization survives.
 
-![Day 17 of a run](docs/screenshot.png)
+<img src="docs/screenshot-phone.png" width="270" alt="Portrait phone layout"> <img src="docs/screenshot.png" width="480" alt="Landscape">
 
 ## Controls
+
+It's built as a **phone game**: the layout adapts to any screen size or orientation (whole-number pixel scale,
+short side about 270 game pixels, safe-area aware), and the HUD wraps into finger-sized buttons on narrow screens.
+
+**Touch:** tap a power button, then tap the map to cast. Drag with one finger to pan, pinch to zoom.
+Tap the speed button to cycle x1, x2, x4, x8, pause. Tap anywhere after game over for a new world.
+
+**Desktop (for testing):**
 
 | Key / mouse | Action |
 |---|---|
@@ -38,7 +46,9 @@ cmake --build build -j
 ./build/villagesim_test       # balance/self-test (also: ctest --test-dir build)
 ```
 
-`./build/villagesim --seed 7 --days 16 --shot out.bmp` renders one frame after N days without opening a window.
+`./build/villagesim --seed 7 --days 16 --size 1080x2340 --shot out.bmp` renders one frame at a phone resolution after N days without opening a window. `--size WxH` also sets the desktop window size, so you can preview phone layouts.
+
+Android/iOS packaging isn't set up yet; SDL3 supports both, so that's the next build step.
 
 ## Layout
 
