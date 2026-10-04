@@ -331,6 +331,59 @@ void smoke(Canvas& cv, int x, int y, int frame, int seed) {
     }
 }
 
+// ---------------------------------------------------------------- stock piles
+// Goods are not counted in the HUD; they sit as piles on the map instead.
+// How full a pile is: the town's stock split over the buildings that hold it.
+int pileLevel(const World& w, Res r, int holders, float step, int maxN) {
+    if (holders <= 0) return 0;
+    float per = w.store[(int)r] / holders;
+    if (per <= 0.05f) return 0;
+    return std::min(maxN, (int)std::ceil(per / step));
+}
+// logs stacked in a pyramid, end grain facing us; (x, bottom) = lower-left
+void logPile(Canvas& cv, int x, int bottom, int n) {
+    int base = n >= 6 ? 3 : (n >= 3 ? 2 : 1), k = 0;
+    for (int r = 0; k < n && r < 3; r++)
+        for (int i = 0; i < base - r && k < n; i++, k++) {
+            int lx = x + i * 4 + r * 2, ly = bottom - 4 - r * 3;
+            cv.rect(lx, ly, 4, 4, OUTLINE); cv.rect(lx + 1, ly + 1, 2, 2, WOOD_L); cv.put(lx + 1, ly + 1, RIPE_D);
+        }
+}
+// planks: n boards, 2px each, w wide
+void plankPile(Canvas& cv, int x, int bottom, int n, int w = 11) {
+    if (n <= 0) return;
+    cv.rect(x - 1, bottom - 2 * n - 1, w + 3, 2 * n + 2, OUTLINE);
+    for (int i = 0; i < n; i++) {
+        int yy = bottom - 2 - i * 2, off = (i & 1);
+        cv.rect(x + off, yy, w, 1, i & 1 ? WOOD : WOOD_L);
+        cv.rect(x + off, yy + 1, w, 1, WOOD_D);
+        cv.put(x + off + (i * 5 + 3) % w, yy, WOOD_D);   // knot
+    }
+}
+// sacks (flour) or sheaves (wheat), up to 2 rows
+void sacks(Canvas& cv, int x, int bottom, int n, bool wheat) {
+    for (int k = 0; k < n; k++) {
+        int r = k / 3, i = k % 3;
+        int sx = x + i * 5 + r * 2, sy = bottom - 6 - r * 4;
+        if (wheat) {
+            cv.rect(sx + 1, sy, 3, 6, RIPE_D); cv.rect(sx, sy, 5, 2, RIPE); cv.put(sx + 2, sy + 3, WOOD_D);
+            cv.put(sx - 1, sy + 5, OUTLINE); cv.put(sx + 5, sy + 5, OUTLINE);
+        } else {
+            cv.rect(sx, sy + 1, 5, 5, OUTLINE); cv.rect(sx + 1, sy + 1, 3, 4, 0xfdf7ed); cv.put(sx + 3, sy + 4, WALL_D);
+            cv.rect(sx + 2, sy, 1, 1, OUTLINE);
+        }
+    }
+}
+// open crate with loaves or fish on top
+void crate(Canvas& cv, int x, int bottom, int n, bool fish) {
+    cv.rect(x, bottom - 5, 9, 5, OUTLINE); cv.rect(x + 1, bottom - 4, 7, 3, WOOD); cv.rect(x + 1, bottom - 3, 7, 1, WOOD_D);
+    for (int k = 0; k < n; k++) {
+        int i = k % 3, r = k / 3, fx = x + 1 + i * 3 - r, fy = bottom - 7 - r * 2;
+        if (fish) { cv.rect(fx, fy, 3, 2, 0x8fd3ff); cv.put(fx + 2, fy + 1, 0x4d9be6); }
+        else { cv.rect(fx, fy, 3, 2, 0xcd683d); cv.put(fx + 1, fy, SAND_L); }
+    }
+}
+
 void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool night, bool winter, int seed) {
     const BInfo& in = binfo(b.type);
     int x = b.x * T, y = b.y * T, W = in.w * T, H = in.h * T;
@@ -349,6 +402,10 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         cv.rect(tx + 6, y - 9, 6, 3, 0xf9c22b); cv.rect(tx + 6 + 2 * wave, y - 7, 4, 1, 0xfbb954);
         window(cv, x + 7, y + 32, night); window(cv, x + W - 13, y + 32, night);
         door(cv, x + W / 2 - 3, y + H - 10, 8);
+        // the town's store: start stock and anything no producer is holding
+        logPile(cv, x + 2, y + H, pileLevel(w, Res::Logs, 1 + w.count(BType::Lumber), 3.f, 6));
+        plankPile(cv, x + W - 15, y + H - 1, pileLevel(w, Res::Planks, 1 + w.count(BType::Sawmill), 4.f, 4), 10);
+        if (w.food() > 0.05f) crate(cv, x + 12, y + H - 1, std::min(5, (int)std::ceil(w.food() / std::max(1, 1 + w.count(BType::Bakery) + w.count(BType::Fisher)) / 8.f)), w.store[(int)Res::Fish] > w.store[(int)Res::Bread]);
         break;
     }
     case BType::House: {
@@ -362,12 +419,7 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
     case BType::Lumber: {
         cottage(cv, x + 1, y + 3, 20, H - 6, roof, night, winter, 11);
         door(cv, x + 8, y + H - 10, 7);
-        // log pile with end grain rings
-        for (int r = 0; r < 3; r++)
-            for (int i = 0; i < 3 - r; i++) {
-                int lx = x + 22 + i * 3 + r * 1, ly = y + H - 6 - r * 3;
-                cv.rect(lx - 1, ly - 1, 4, 4, OUTLINE); cv.rect(lx, ly, 2, 2, WOOD_L); cv.put(lx, ly, RIPE_D);
-            }
+        logPile(cv, x + 20, y + H - 1, pileLevel(w, Res::Logs, 1 + w.count(BType::Lumber), 3.f, 6));
         // stump with axe
         cv.rect(x + 23, y + 8, 6, 4, TRUNK); cv.rect(x + 23, y + 7, 6, 1, WOOD_L);
         cv.line(x + 26, y + 7, x + 28, y + 2, WOOD); cv.rect(x + 27, y + 1, 3, 2, ROCK_LL);
@@ -386,9 +438,7 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         }
         for (int k = 0; k < 8; k++) { float a = a0 + k * 0.785f; cv.put(cx + (int)std::lround(std::cos(a) * 5.5f), cy + (int)std::lround(std::sin(a) * 5.5f), ROCK_LL); }
         cv.rect(cx - 1, cy - 1, 2, 2, OUTLINE);
-        // plank stack
-        for (int i = 0; i < 3; i++) { cv.rect(x + W - 14, y + H - 5 - i * 2, 12, 2, i & 1 ? WOOD : WOOD_L); }
-        cv.outlineRect(x + W - 15, y + H - 10, 14, 7, OUTLINE);
+        plankPile(cv, x + W - 15, y + H - 2, pileLevel(w, Res::Planks, 1 + w.count(BType::Sawmill), 3.f, 6), 12);
         break;
     }
     case BType::Fisher: {
@@ -397,8 +447,9 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         // drying rack with fish
         cv.line(x + 24, y + 6, x + 24, y + H - 3, WOOD_D); cv.line(x + 30, y + 6, x + 30, y + H - 3, WOOD_D);
         cv.line(x + 23, y + 7, x + 31, y + 7, WOOD);
-        for (int i = 0; i < 3; i++) { int fx = x + 25 + i * 2; cv.rect(fx, y + 8, 1, 4, 0x8fd3ff); cv.put(fx, y + 12, 0x4d9be6); }
-        cv.rect(x + 24, y + H - 7, 6, 4, WOOD); cv.outlineRect(x + 23, y + H - 8, 8, 6, OUTLINE);   // barrel
+        int nf = pileLevel(w, Res::Fish, w.count(BType::Fisher) + w.count(BType::Bakery) + 1, 8.f, 8);
+        for (int i = 0; i < std::min(3, nf); i++) { int fx = x + 25 + i * 2; cv.rect(fx, y + 8, 1, 4, 0x8fd3ff); cv.put(fx, y + 12, 0x4d9be6); }
+        crate(cv, x + 23, y + H - 1, std::max(0, nf - 3), true);
         break;
     }
     case BType::Farm: {
@@ -430,6 +481,7 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         // barn in the corner
         cottage(cv, x + W - 17, y + H - 18, 15, 15, roof, night, winter, 7, 0xc75b39);
         cv.rect(x + W - 12, y + H - 9, 5, 6, DOOR); cv.line(x + W - 12, y + H - 9, x + W - 8, y + H - 4, WOOD_L);
+        sacks(cv, x + W - 33, y + H - 2, pileLevel(w, Res::Wheat, w.count(BType::Farm), 4.f, 6), true);   // harvested sheaves
         // scarecrow
         if (!winter) { int sx = x + 10, sy = y + 30; cv.line(sx, sy, sx, sy - 8, WOOD_D); cv.line(sx - 3, sy - 6, sx + 3, sy - 6, WOOD_D); cv.rect(sx - 1, sy - 10, 3, 3, RIPE); cv.rect(sx - 2, sy - 11, 5, 1, 0x7a4a2a); }
         break;
@@ -466,6 +518,7 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
                 }
         }
         cv.rect(hx - 1, hy - 1, 3, 3, OUTLINE);
+        sacks(cv, cx + 5, y + H, pileLevel(w, Res::Flour, w.count(BType::Mill), 3.f, 3), false);
         break;
     }
     case BType::Bakery: {
@@ -481,6 +534,8 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         // hanging bread sign
         cv.line(x + W - 4, y + 15, x + W, y + 15, WOOD_D);
         cv.rect(x + W - 4, y + 16, 5, 4, 0xcd683d); cv.rect(x + W - 3, y + 16, 3, 1, SAND_L);
+        int nb = pileLevel(w, Res::Bread, w.count(BType::Bakery) + 1, 8.f, 6);
+        if (nb > 0) crate(cv, x + 2, y + H - 1, nb, false);
         break;
     }
     case BType::Well: {

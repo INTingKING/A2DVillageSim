@@ -255,13 +255,12 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
     float y = (float)g.safeTop + pad;
     float topStart = 0;
     std::string dayS = "DAY " + std::to_string(w.day() + 1);
-    // one row of icon counters: people, food (bread + fish), logs, planks, and sick when there are any
     struct Stat { int icon; std::string v; uint32_t col; };
+    // goods live on the map as piles; the bar only speaks up when food or firewood runs short
     std::vector<Stat> stats = {
-        {0, std::to_string(w.population()) + "/" + std::to_string(w.housing()), w.population() >= w.housing() ? UI_WARN : UI_TEXT},
-        {1, std::to_string((int)w.food()), w.food() < w.population() * 2 ? UI_BAD : UI_TEXT},
-        {2, std::to_string((int)w.store[(int)Res::Logs]), (w.season() == Season::Winter && w.store[(int)Res::Logs] < 8) ? UI_BAD : UI_TEXT},
-        {3, std::to_string((int)w.store[(int)Res::Planks]), UI_TEXT}};
+        {0, std::to_string(w.population()) + "/" + std::to_string(w.housing()), w.population() >= w.housing() ? UI_WARN : UI_TEXT}};
+    if (w.food() < w.population() * 2) stats.push_back({1, "LOW", UI_BAD});
+    if (w.season() == Season::Winter && w.store[(int)Res::Logs] < 8) stats.push_back({2, "LOW", UI_BAD});
     if (w.sickCount() > 0) stats.push_back({4, std::to_string(w.sickCount()), 0x9cdb43});
     float topH = g.safeTop + pad + 22.f + 13.f + 3.f;
     if (draw) {
@@ -270,7 +269,7 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
         text(ren, pad, y + 1, UI_TEXT, dayS, 2.f);
         text(ren, pad + 16.f * dayS.size() + 6.f, y + 5, UI_DIM, seasonName(w.season()));
         if (g.daily) text(ren, pad + 16.f * dayS.size() + 6.f + 8.f * (std::strlen(seasonName(w.season())) + 1), y + 5, UI_WARN, "DAILY");
-        float cw = (g.scrW - 2 * pad) / (float)stats.size(), sy = y + 23.f;
+        float cw = (g.scrW - 2 * pad) / 4.f, sy = y + 23.f;
         for (size_t i = 0; i < stats.size(); i++) {
             float sx = pad + i * cw;
             statIcon(ren, sx, sy, stats[i].icon);
