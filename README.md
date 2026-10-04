@@ -20,7 +20,7 @@ There are no god powers: wells, healers and watchtowers are your only protection
 - **Warnings:** every disaster is announced 8 game seconds before it hits, with a countdown chip under the day counter, a glow on the edge raiders come from, and a tint for fire, plague or blizzard. A warning drops the speed back to x1.
 - **It gets harder:** disasters come more often and hit harder as the days pass, and after day 35 a second one can arrive in the afternoon. Every town falls eventually.
 - **The town's story:** when your town falls, the game-over screen tells its story day by day: founding, key buildings, growth, winters survived, the disasters that hit hardest, and the end.
-- **Daily run:** the Daily button (or `--daily`) starts today's world, the same for everyone on the same date, with its own best score.
+- **Daily run:** the start screen has a big Daily button (also on the game-over screen, or `--daily`). It starts today's world, the same for everyone on the same UTC date, with its own best score. The sim uses its own random-number mapping so desktop and phone builds generate the same world from one seed.
 - Roof colours follow the drawer tabs: red-brown homes, straw food, green-brown wood, slate safety.
 
 ## Controls

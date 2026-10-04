@@ -95,8 +95,10 @@ static const char* storyName(Event e) {
     }
 }
 
-float World::frand(float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng); }
-int World::irand(int a, int b) { return std::uniform_int_distribution<int>(a, b)(rng); }
+// Hand-written mappings: std::mt19937's raw output is fixed by the standard, but the std
+// distributions are not, so libstdc++ and libc++ would build different worlds from one seed.
+float World::frand(float a, float b) { return a + (b - a) * ((uint32_t)rng() >> 8) * (1.f / 16777216.f); }
+int World::irand(int a, int b) { return a + (int)(((uint64_t)(uint32_t)rng() * (uint64_t)(b - a + 1)) >> 32); }
 
 void World::say(const std::string& s) {
     log.push_back({day() + 1, s});

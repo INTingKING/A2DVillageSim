@@ -23,7 +23,7 @@ using namespace sim;
 
 // Daily run: everyone gets the same world (and so the same disaster dice) on the same date.
 static uint32_t todaySeed() {
-    std::time_t t = std::time(nullptr); std::tm lt = *std::localtime(&t);
+    std::time_t t = std::time(nullptr); std::tm lt = *std::gmtime(&t);   // UTC, so every time zone shares one daily world
     return (uint32_t)((lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday);
 }
 static std::string bestFile(bool daily) { return daily ? "best_daily_" + std::to_string(todaySeed()) + ".txt" : "best_score.txt"; }
@@ -54,7 +54,7 @@ constexpr uint32_t UI_BG = 0x2e222f, UI_PANEL = 0x3e3546, UI_SEL = 0x6b3e75, UI_
 static const uint32_t TAB_COL[4] = {0xb33831, 0xe0a83a, 0x5b6b2e, 0x5a6e9c};   // roof colours per category
 
 enum class Tool { None, Place, Road, Remove };
-enum BtnId { B_TAB0 = 0, B_ROAD = 10, B_REMOVE, B_CARD0 = 20, B_OK = 40, B_CANCEL, B_SPEED, B_RESTART, B_ZIN, B_ZOUT, B_DAILY };
+enum BtnId { B_TAB0 = 0, B_ROAD = 10, B_REMOVE, B_CARD0 = 20, B_OK = 40, B_CANCEL, B_SPEED, B_RESTART, B_ZIN, B_ZOUT, B_DAILY, B_PLAY, B_BLOCK };
 struct Btn { SDL_FRect r; int id; };
 
 static const char* shortName(BType t) {
@@ -72,6 +72,7 @@ struct Game {
     int speed = 1; bool paused = false;
     int best = 0, bestDaily = 0; bool bestSaved = false; uint32_t seed = 1; bool daily = false;
     Event warnedFor = Event::None;
+    bool menu = false;   // start screen: Daily / New world
     float zoom = 2; float camX = 0, camY = 0;
     int scrW = 270, scrH = 585;
     int viewY = 0, viewW = 270, viewH = 400;   // map viewport between the top bar and the drawer
@@ -120,7 +121,7 @@ struct Game {
         camX = wx - lx / zoom; camY = wy - (ly - viewY) / zoom; clampCam();
     }
     void cycleSpeed() { if (paused) { paused = false; speed = 1; } else if (speed >= 8) paused = true; else speed *= 2; }
-    void restart(uint32_t s, bool isDaily = false) { seed = s; daily = isDaily; warnedFor = Event::None; world = std::make_unique<World>(s, true); bestSaved = false; cancelTool(); tab = -1; centerOnHall(); }
+    void restart(uint32_t s, bool isDaily = false) { seed = s; daily = isDaily; warnedFor = Event::None; menu = false; world = std::make_unique<World>(s, true); bestSaved = false; cancelTool(); tab = -1; centerOnHall(); }
     void say(const std::string& s) { toast = s; toastUntil = SDL_GetTicks() + 2500; }
     void cancelTool() { tool = Tool::None; ghostSet = false; roadDrag.clear(); painting = false; remX = remY = -1; }
     void startPlace(BType t) {
@@ -416,6 +417,32 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
             tri(1.35f, 0x14101a); tri(1.f, a.col);
         }
     }
+    if (g.menu) {   // start screen over the (paused) world
+        char buf[64];
+        g.btns.push_back({SDL_FRect{0, 0, (float)g.scrW, (float)g.scrH}, B_BLOCK});   // swallow taps on the map
+        rect(ren, 0, 0, (float)g.scrW, (float)g.scrH, 0x14101a, 170);
+        float bw = std::min(240.f, g.scrW - 20.f), bx = (g.scrW - bw) / 2, cy = g.scrH * 0.30f;
+        SDL_FRect tb{0, cy, (float)g.scrW, 16};
+        std::string title = "VILLAGE SIM";
+        text(ren, (g.scrW - 16.f * title.size()) / 2, cy, UI_TEXT, title, 2.f);
+        centered(ren, tb, cy + 24, UI_DIM, "You can't win.");
+        centered(ren, tb, cy + 34, UI_DIM, "You can only last.");
+        uint32_t ds = todaySeed();
+        std::snprintf(buf, sizeof(buf), "%04u-%02u-%02u UTC", ds / 10000, ds / 100 % 100, ds % 100);
+        SDL_FRect d{bx, cy + 60, bw, 58};
+        g.btns.push_back({d, B_DAILY});
+        button(ren, d, 0x3e2a4f, true, UI_WARN);
+        text(ren, (g.scrW - 16.f * 5) / 2, d.y + 8, UI_WARN, "DAILY", 2.f);
+        centered(ren, d, d.y + 28, UI_TEXT, buf);
+        std::string bd = g.bestDaily > 0 ? "Today's best: " + std::to_string(g.bestDaily) + " days" : "Not played yet";
+        centered(ren, d, d.y + 40, g.bestDaily > 0 ? UI_GOOD : UI_DIM, bd);
+        SDL_FRect n{bx, d.y + d.h + 10, bw, 40};
+        g.btns.push_back({n, B_PLAY});
+        button(ren, n, 0x1a7a4c, true, UI_GOOD);
+        centered(ren, n, n.y + 9, UI_TEXT, "New world");
+        centered(ren, n, n.y + 22, 0xc7dcd0, g.best > 0 ? "Best: " + std::to_string(g.best) + " days" : "Random map");
+        return;
+    }
     if (w.gameOver()) {
         char buf[96];
         float bw = std::min(262.f, g.scrW - 8.f), bx = (g.scrW - bw) / 2;
@@ -465,6 +492,7 @@ static void pressButton(Game& g, int id) {
     else if (id == B_ZOUT) g.stepZoomCenter(-1);
     else if (id == B_RESTART) g.restart(g.daily ? todaySeed() + 7919u * (uint32_t)SDL_GetTicks() : g.seed + 1);
     else if (id == B_DAILY) g.restart(todaySeed(), true);
+    else if (id == B_PLAY) g.menu = false;
     else if (id >= B_TAB0 && id < B_TAB0 + 4) { g.tab = g.tab == id - B_TAB0 ? -1 : id - B_TAB0; if (g.tool != Tool::Place) g.cancelTool(); }
     else if (id == B_ROAD) { bool on = g.tool == Tool::Road; g.cancelTool(); g.selected = -1; if (!on) { g.tool = Tool::Road; g.tab = -1; } }
     else if (id == B_REMOVE) { bool on = g.tool == Tool::Remove; g.cancelTool(); g.selected = -1; if (!on) { g.tool = Tool::Remove; g.tab = -1; } }
@@ -600,7 +628,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--ui") && i + 1 < argc) shotUi = argv[++i];
         else if (!std::strcmp(argv[i], "--help")) {
             std::printf("villagesim [--seed N] [--size WxH]\n"
-                        "  --shot out.bmp [--days N] [--demo] [--ui none|well|road|info|warn] [--daily] [--zoom 0.5..4]  render one frame and exit\n"
+                        "  --shot out.bmp [--days N] [--demo] [--ui none|well|road|info|warn|menu] [--daily] [--zoom 0.5..4]  render one frame and exit\n"
                         "  --demo  a scripted player builds the town during --days (for screenshots)\n");
             return 0;
         }
@@ -621,6 +649,7 @@ int main(int argc, char** argv) {
     Game g;
     g.best = loadBest(); g.bestDaily = loadBest(true);
     g.restart(daily ? todaySeed() : seed, daily);
+    g.menu = !shotPath && !daily;   // start screen on a normal launch
     relayout(ren, g);
     g.zoom = std::max(1.f, g.minZoom());
     if (shotZoom > 0.f) { g.zoom = shotZoom; g.zoom = g.ZL[g.zoomIndex()]; }
@@ -632,6 +661,7 @@ int main(int argc, char** argv) {
             for (int t = 0; t < TICKS_PER_DAY && !w.gameOver(); t++) w.tick();
         }
         for (int t = 0; t < TICKS_PER_DAY / 3 && !w.gameOver(); t++) w.tick();   // midday light
+        if (shotUi == "menu") g.menu = true;
         if (shotUi == "warn") { w.pending = Event::Raiders; w.pendingTicks = 50; w.pendingSide = -1; }
         if (shotUi == "warn2") { w.pending = Event::Wildfire; w.pendingTicks = 60; w.pendingSide = 0; }
         if (shotUi == "well" || shotUi == "tower") {
@@ -712,7 +742,7 @@ int main(int argc, char** argv) {
         }
         acc += (now - last) / 1000.0; last = now;
         if (acc > 0.5) acc = 0.5;
-        while (acc >= 0.1) { acc -= 0.1; if (!g.paused) for (int s = 0; s < g.speed; s++) g.world->tick(); }
+        while (acc >= 0.1) { acc -= 0.1; if (!g.paused && !g.menu) for (int s = 0; s < g.speed; s++) g.world->tick(); }
         if (g.world->gameOver() && !g.bestSaved) {
             int& best = g.daily ? g.bestDaily : g.best;
             if (g.world->day() > best) { best = g.world->day(); saveBest(best, g.daily); }
