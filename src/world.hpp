@@ -1,7 +1,9 @@
 #pragma once
-// A2DVillageSim core: a god-view survival sim. Villagers run themselves;
-// disasters escalate; the player spends mana on divine powers. Score = days survived.
-// No SDL here so the sim can run headless in tests.
+// A2DVillageSim core: an Anno-style survival town builder for phones.
+// The player places buildings and roads; villagers staff them and run the
+// production chains (trees -> logs -> planks, wheat -> flour -> bread, fish).
+// Disasters escalate; there are no god powers, only buildings that protect you.
+// Score = days survived. No SDL here so the sim runs headless in tests.
 #include <cstdint>
 #include <random>
 #include <string>
@@ -14,35 +16,63 @@ constexpr int MAP_H = 120;
 constexpr int TICKS_PER_DAY = 240;   // 10 ticks/s at 1x -> 24 s per day
 constexpr int DAYS_PER_SEASON = 6;
 
-enum class Tile : uint8_t { Deep, Water, Sand, Grass, Forest, Mountain, Farm, House, Hall, Ash };
+enum class Tile : uint8_t { Deep, Water, Sand, Grass, Forest, Mountain, Ash, Road, Building };
 enum class Season : uint8_t { Spring, Summer, Autumn, Winter };
-enum class Job : uint8_t { Farmer, Lumber, Builder };
-enum class Power : uint8_t { Rain, Heal, Bless, Smite, Count };
 enum class Event : uint8_t { None, Drought, Plague, Wildfire, Raiders, Locusts, Blizzard };
+enum class Res : uint8_t { Logs, Planks, Wheat, Flour, Bread, Fish, Count };
+
+enum class BType : uint8_t {
+    Hall, House, Lumber, Sawmill, Fisher, Farm, Mill, Bakery, Well, Healer, Tower, Count
+};
+enum class Category : uint8_t { Home, Food, Wood, Safety, Count };
+
+struct BInfo {
+    const char* name;
+    int w, h;
+    int costLogs, costPlanks;
+    int workers;
+    float radius;          // coverage (well/healer/tower) or work area (lumber/fisher), tiles
+    Category cat;
+    const char* desc;
+};
+const BInfo& binfo(BType t);
+const char* resName(Res r);
+const char* seasonName(Season s);
+const char* categoryName(Category c);
 
 struct Cell {
     Tile t = Tile::Grass;
-    float res = 0.f;      // forest wood left, farm growth 0..1, ash regrow timer
+    float res = 0.f;      // forest wood left, ash regrow timer
     float fire = 0.f;     // >0 burning
     float height = 0.f;
+    int16_t bld = -1;     // building index when t == Building
+};
+
+struct Building {
+    BType type = BType::House;
+    int x = 0, y = 0;         // top-left tile
+    bool alive = true;
+    bool connected = false;   // road link to the hall
+    int staffed = 0;          // workers currently assigned
+    float work = 0.f;         // production progress
+    float grow = 0.f;         // farm crop growth 0..1
+    float cooldown = 0.f;     // tower reload
+    bool hungry = false, cold = false;   // houses: missing needs (shown as icons)
 };
 
 struct Villager {
     float x = 0, y = 0;   // tile coords (float)
-    int tx = -1, ty = -1; // target tile
-    Job job = Job::Farmer;
     float health = 100.f;
     float age = 0.f;      // days
     float maxAge = 70.f;
-    float workTimer = 0.f;
+    float timer = 0.f;
     bool sick = false;
-    bool carrying = false;
     bool alive = true;
-    uint32_t id = 0;
-    int task = 0;              // see World::Task
-    float carryAmt = 0.f;
-    uint8_t carryKind = 0;     // 0 food, 1 wood
-    std::vector<int> path;     // tile indices to walk
+    int work = -1;        // building index or -1
+    int task = 0;
+    int tx = -1, ty = -1;
+    bool carrying = false;
+    std::vector<int> path;
     size_t pathPos = 0;
 };
 
@@ -54,18 +84,23 @@ struct Raider {
     float loot = 0.f;
 };
 
+struct Arrow { float x0, y0, x1, y1; int born; };
 struct LogLine { int day; std::string text; };
-
-struct PowerInfo { const char* name; int cost; float radius; const char* desc; };
-const PowerInfo& powerInfo(Power p);
-const char* seasonName(Season s);
 
 class World {
 public:
     explicit World(uint32_t seed = 1, bool disasters = true);
 
-    void tick();                       // one fixed step (0.1 s at 1x)
-    bool cast(Power p, int cx, int cy); // false if not enough mana / invalid
+    void tick();   // one fixed step (0.1 s at 1x)
+
+    // Building API (used by the UI and by tests)
+    bool canAfford(BType t) const;
+    bool canPlace(BType t, int x, int y) const;   // fits on free land
+    bool place(BType t, int x, int y);            // pays and builds instantly
+    bool canRoad(int x, int y) const;
+    bool placeRoad(int x, int y);                 // 1 log per tile
+    bool demolish(int x, int y);                  // building or road, refunds half
+    int buildingAt(int x, int y) const;
 
     Cell& at(int x, int y) { return cells[y * MAP_W + x]; }
     const Cell& at(int x, int y) const { return cells[y * MAP_W + x]; }
@@ -75,49 +110,53 @@ public:
     float dayFrac() const { return (ticks % TICKS_PER_DAY) / (float)TICKS_PER_DAY; }
     Season season() const { return (Season)((day() / DAYS_PER_SEASON) % 4); }
     int population() const;
-    int houses() const { return houseCount; }
-    int farms() const { return farmCount; }
+    int housing() const;
     int sickCount() const;
-    int fireCount() const;
     int raidersAlive() const;
+    int count(BType t) const;
+    int jobsOpen() const;
+    float food() const { return store[(int)Res::Bread] + store[(int)Res::Fish]; }
     bool gameOver() const { return over; }
 
     std::vector<Cell> cells;
+    std::vector<Building> buildings;
     std::vector<Villager> villagers;
     std::vector<Raider> raiders;
+    std::vector<Arrow> arrows;
     std::vector<LogLine> log;
-    float food = 40.f, wood = 30.f, mana = 60.f;
-    int hallX = 0, hallY = 0;
+    float store[(int)Res::Count] = {};
+    int hallX = 0, hallY = 0;      // hall top-left
     int droughtDays = 0, blizzardDays = 0;
     int ticks = 0;
     bool disastersOn = true;
     bool over = false;
     int births = 0, deaths = 0;
-    std::string causeOfEnd;
-    // last cast, for visual effects
-    Power lastPower = Power::Rain;
-    int lastCastX = -1, lastCastY = -1, lastCastTick = -1000;
+    int dirty = 1;                 // bumps when buildings/roads change (UI can watch it)
 
 private:
     std::mt19937 rng;
-    uint32_t nextId = 1;
-    int houseCount = 0, farmCount = 0;
+    std::vector<uint8_t> wellCover, healCover;
 
     float frand(float a = 0.f, float b = 1.f);
     int irand(int a, int b);
     void generate();
-    void recount();
+    void refresh();          // connectivity, coverage, staffing
+    void assignJobs();
     void dawn();
     void rollEvent();
     void startEvent(Event e);
-    void updateVillager(Villager& v);
+    void updateVillager(int vi);
+    void updateBuilding(int bi);
     void updateRaiders();
     void updateTiles();
-    bool findNearest(int sx, int sy, Tile t, int& ox, int& oy, float minRes, int maxR) const;
-    bool findBuildSpot(int& ox, int& oy);
+    void destroyBuilding(int bi, const char* why);
+    bool nearestTile(int sx, int sy, Tile t, int r, int& ox, int& oy) const;
     void spawnVillager(float x, float y, float age);
     void kill(Villager& v, const char* why);
     void say(const std::string& s);
+    bool take(Res r, float n);
+public:
+    void doorOf(const Building& b, int& x, int& y) const;   // a walkable tile next to it
 };
 
 } // namespace sim

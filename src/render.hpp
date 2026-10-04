@@ -1,14 +1,22 @@
 #pragma once
 #include "world.hpp"
 #include <cstdint>
+#include <vector>
 
-// Draws the world into a 32-bit XRGB pixel buffer, 4x4 pixels per tile.
-constexpr int TILE_PX = 4;
-constexpr int VIEW_W = sim::MAP_W * TILE_PX;   // 256
-constexpr int VIEW_H = sim::MAP_H * TILE_PX;   // 480
-constexpr int HUD_H = 24;
-constexpr int SCREEN_W = VIEW_W;
-constexpr int SCREEN_H = VIEW_H + HUD_H;        // 280
+// Draws the world into a 32-bit XRGB pixel buffer, 8x8 pixels per tile.
+constexpr int TILE_PX = 8;
+constexpr int VIEW_W = sim::MAP_W * TILE_PX;   // 512
+constexpr int VIEW_H = sim::MAP_H * TILE_PX;   // 960
 
-void drawWorld(const sim::World& w, uint32_t* px, int pitchPx, int frame,
-               int cursorX, int cursorY, int powerSel);
+// What the UI wants drawn on top of the world (placement ghost, road preview, demolish target).
+struct Overlay {
+    int ghost = -1;            // BType being placed, or -1
+    int gx = 0, gy = 0;        // ghost top-left tile
+    bool ghostOk = false;
+    bool roadMode = false;
+    std::vector<int> roadTiles;   // tiles painted in the current drag (preview)
+    int demolishX = -1, demolishY = -1;
+    int selected = -1;         // building index tapped for info
+};
+
+void drawWorld(const sim::World& w, uint32_t* px, int pitchPx, int frame, const Overlay& ov);
