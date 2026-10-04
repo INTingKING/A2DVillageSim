@@ -595,15 +595,16 @@ int idleReason(const World& w, const Building& b) {
 }
 
 // Speech bubble with a 2x-scaled 5x4 icon.
-void bubble(Canvas& cv, int cx, int y, int frame, int kind) {
+// k scales the whole bubble so it keeps its on-screen size when the camera zooms out.
+void bubble(Canvas& cv, int cx, int y, int frame, int kind, int k) {
     int bob = (frame / 15) % 2;
-    int bx = cx - 7, by = y - 15 - bob;
-    cv.rect(bx, by, 15, 12, OUTLINE);
-    cv.rect(bx + 1, by + 1, 13, 10, 0xffffff);
-    cv.rect(bx + 1, by + 9, 13, 2, 0xdcd6e0);
-    cv.put(cx, by + 12, OUTLINE); cv.put(cx - 1, by + 12, OUTLINE); cv.put(cx, by + 13, OUTLINE);
-    int ix = bx + 2, iy = by + 2;
-    auto p = [&](int x, int y2, uint32_t c) { cv.rect(ix + x * 2, iy + y2 * 2, 2, 2, c); };
+    int bx = cx - 7 * k, by = y - (15 + bob) * k;
+    auto r = [&](int x, int y2, int w, int h, uint32_t c) { cv.rect(bx + x * k, by + y2 * k, w * k, h * k, c); };
+    r(0, 0, 15, 12, OUTLINE);
+    r(1, 1, 13, 10, 0xffffff);
+    r(1, 9, 13, 2, 0xdcd6e0);
+    r(7, 12, 1, 1, OUTLINE); r(6, 12, 1, 1, OUTLINE); r(7, 13, 1, 1, OUTLINE);
+    auto p = [&](int x, int y2, uint32_t c) { r(2 + x * 2, 2 + y2 * 2, 2, 2, c); };
     switch (kind) {
     case 0: for (int i = 0; i < 5; i++) for (int j = 1; j < 4; j++) p(i, j, 0xcd683d); for (int i = 1; i < 4; i++) p(i, 0, SAND_L); p(1, 2, RIPE); p(3, 2, RIPE); break;
     case 1: for (int i = 0; i < 5; i++) { p(i, 1, TRUNK); p(i, 3, TRUNK_L); } p(2, 0, FIRE1); p(1, 2, FIRE2); p(3, 2, FIRE1); break;
@@ -741,7 +742,7 @@ void drawWorld(const World& w, uint32_t* px, int pitchPx, int frame, const Overl
         int why = idleReason(w, b);
         if (why < 0) continue;
         const BInfo& in = binfo(b.type);
-        bubble(cv, b.x * T + in.w * T / 2, b.y * T + (b.type == BType::Tower ? -16 : -1), frame + o.a * 7, why);
+        bubble(cv, b.x * T + in.w * T / 2, b.y * T + (b.type == BType::Tower ? -16 : -1), frame + o.a * 7, why, ov.markScale);
     }
 
     if (ov.selected >= 0 && ov.selected < (int)w.buildings.size() && w.buildings[ov.selected].alive) {

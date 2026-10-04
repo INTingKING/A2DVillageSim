@@ -17,6 +17,7 @@ struct Overlay {
     std::vector<int> roadTiles;   // tiles painted in the current drag (preview)
     int demolishX = -1, demolishY = -1;
     int selected = -1;         // building index tapped for info
+    int markScale = 1;         // need bubbles are drawn this many times bigger (zoomed out)
     // visible part of the world in world pixels; only this region is redrawn
     int vx0 = 0, vy0 = 0, vx1 = VIEW_W, vy1 = VIEW_H;
 };

@@ -59,16 +59,24 @@ struct Game {
     std::string toast; uint64_t toastUntil = 0;
     std::vector<Btn> btns;
 
-    static constexpr float ZL[] = {0.5f, 0.75f, 1.f, 1.5f, 2.f, 3.f, 4.f};   // zoom steps (below 1 = zoomed out)
-    static constexpr int NZL = 7;
+    // Zoom steps (below 1 = zoomed out). Each step is snapped so one world pixel covers a whole
+    // number of screen pixels at the current UI scale, which keeps pixel art even when panning.
+    std::vector<float> ZL{0.5f, 1.f, 2.f, 3.f, 4.f};
+    void buildZoomSteps(int uiScale) {
+        ZL.clear();
+        for (float z : {0.5f, 0.75f, 1.f, 1.5f, 2.f, 3.f, 4.f}) {
+            float snapped = std::max(1.f, std::round(z * uiScale)) / uiScale;
+            if (ZL.empty() || snapped > ZL.back() + 1e-4f) ZL.push_back(snapped);
+        }
+    }
     float minZoom() const {   // lowest step that still fills the viewport with map
         float fit = std::max((float)viewW / VIEW_W, (float)viewH / VIEW_H);
         for (float z : ZL) if (z >= fit) return z;
-        return ZL[NZL - 1];
+        return ZL.back();
     }
-    float maxZoom() const { return ZL[NZL - 1]; }
-    int zoomIndex() const { int best = 0; for (int i = 1; i < NZL; i++) if (std::abs(ZL[i] - zoom) < std::abs(ZL[best] - zoom)) best = i; return best; }
-    void stepZoom(int d, float lx, float ly) { setZoom(ZL[std::clamp(zoomIndex() + d, 0, NZL - 1)], lx, ly); }
+    float maxZoom() const { return ZL.back(); }
+    int zoomIndex() const { int best = 0; for (int i = 1; i < (int)ZL.size(); i++) if (std::abs(ZL[i] - zoom) < std::abs(ZL[best] - zoom)) best = i; return best; }
+    void stepZoom(int d, float lx, float ly) { setZoom(ZL[std::clamp(zoomIndex() + d, 0, (int)ZL.size() - 1)], lx, ly); }
     void stepZoomCenter(int d) { stepZoom(d, viewW / 2.f, viewY + viewH / 2.f); }
     void clampCam() {
         zoom = std::clamp(zoom, minZoom(), maxZoom());
@@ -462,8 +470,8 @@ static void handleTouch(SDL_Renderer* ren, Game& g, const SDL_Event& e) {
             touch.midX = mx; touch.midY = my;
             if (touch.pinchStart > 1.f) {
                 float d = std::hypot(touch.x[1] - touch.x[0], touch.y[1] - touch.y[0]);
-                float want = touch.zoomStart * d / touch.pinchStart, z = Game::ZL[0];   // snap to the nearest step
-                for (float s : Game::ZL) if (std::abs(std::log2(s / want)) < std::abs(std::log2(z / want))) z = s;
+                float want = touch.zoomStart * d / touch.pinchStart, z = g.ZL[0];   // snap to the nearest step
+                for (float s : g.ZL) if (std::abs(std::log2(s / want)) < std::abs(std::log2(z / want))) z = s;
                 if (z != g.zoom) g.setZoom(z, mx, my);
             }
         }
@@ -484,6 +492,7 @@ static void relayout(SDL_Renderer* ren, Game& g) {
     SDL_GetCurrentRenderOutputSize(ren, &pw, &ph);
     if (pw <= 0 || ph <= 0) return;
     int scale = std::max(1, std::min(pw, ph) / 270);   // short side ~270 logical px, whole-number scale
+    g.buildZoomSteps(scale);
     g.scrW = std::max(160, pw / scale); g.scrH = std::max(160, ph / scale);
     SDL_SetRenderLogicalPresentation(ren, g.scrW, g.scrH, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
     SDL_Window* win = SDL_GetRenderWindow(ren);
@@ -537,7 +546,7 @@ int main(int argc, char** argv) {
     g.restart(seed);
     relayout(ren, g);
     g.zoom = std::max(1.f, g.minZoom());
-    if (shotZoom > 0.f) g.zoom = shotZoom;
+    if (shotZoom > 0.f) { g.zoom = shotZoom; g.zoom = g.ZL[g.zoomIndex()]; }
     g.centerOnHall();
     if (shotPath) {
         World& w = *g.world;
@@ -636,6 +645,7 @@ int main(int argc, char** argv) {
         ov.roadMode = g.tool == Tool::Road; ov.roadTiles = g.roadDrag;
         if (g.tool == Tool::Remove) { ov.demolishX = g.remX; ov.demolishY = g.remY; }
         ov.selected = g.selected;
+        ov.markScale = g.zoom < 0.99f ? (int)std::ceil(1.f / g.zoom - 0.01f) : 1;   // keep need bubbles readable when zoomed out
 
         ui(ren, g, false);   // measure first so the map viewport is right this frame
         g.clampCam();
@@ -647,7 +657,6 @@ int main(int argc, char** argv) {
         SDL_RenderClear(ren);
         SDL_FRect dst{0, (float)g.viewY, (float)g.viewW, (float)g.viewH};
         SDL_FRect src{g.camX, g.camY, (float)g.viewW / g.zoom, (float)g.viewH / g.zoom};
-        SDL_SetTextureScaleMode(tex, g.zoom < 1.f ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);   // smooth when zoomed out
         SDL_RenderTexture(ren, tex, &src, &dst);
         ui(ren, g, true);
         if (shotPath) {
