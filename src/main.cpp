@@ -30,7 +30,7 @@ constexpr uint32_t UI_BG = 0x2e222f, UI_PANEL = 0x3e3546, UI_SEL = 0x6b3e75, UI_
 static const uint32_t TAB_COL[4] = {0xb33831, 0xe0a83a, 0x5b6b2e, 0x5a6e9c};   // roof colours per category
 
 enum class Tool { None, Place, Road, Remove };
-enum BtnId { B_TAB0 = 0, B_ROAD = 10, B_REMOVE, B_CARD0 = 20, B_OK = 40, B_CANCEL, B_SPEED, B_RESTART };
+enum BtnId { B_TAB0 = 0, B_ROAD = 10, B_REMOVE, B_CARD0 = 20, B_OK = 40, B_CANCEL, B_SPEED, B_RESTART, B_ZIN, B_ZOUT };
 struct Btn { SDL_FRect r; int id; };
 
 static const char* shortName(BType t) {
@@ -47,7 +47,7 @@ struct Game {
     std::unique_ptr<World> world;
     int speed = 1; bool paused = false;
     int best = 0; bool bestSaved = false; uint32_t seed = 1;
-    int zoom = 2; float camX = 0, camY = 0;
+    float zoom = 2; float camX = 0, camY = 0;
     int scrW = 270, scrH = 585;
     int viewY = 0, viewW = 270, viewH = 400;   // map viewport between the top bar and the drawer
     int safeTop = 0, safeBottom = 0;
@@ -59,8 +59,17 @@ struct Game {
     std::string toast; uint64_t toastUntil = 0;
     std::vector<Btn> btns;
 
-    int minZoom() const { int zx = (viewW + VIEW_W - 1) / VIEW_W, zy = (viewH + VIEW_H - 1) / VIEW_H; return std::max(1, std::max(zx, zy)); }
-    int maxZoom() const { return minZoom() + 3; }
+    static constexpr float ZL[] = {0.5f, 0.75f, 1.f, 1.5f, 2.f, 3.f, 4.f};   // zoom steps (below 1 = zoomed out)
+    static constexpr int NZL = 7;
+    float minZoom() const {   // lowest step that still fills the viewport with map
+        float fit = std::max((float)viewW / VIEW_W, (float)viewH / VIEW_H);
+        for (float z : ZL) if (z >= fit) return z;
+        return ZL[NZL - 1];
+    }
+    float maxZoom() const { return ZL[NZL - 1]; }
+    int zoomIndex() const { int best = 0; for (int i = 1; i < NZL; i++) if (std::abs(ZL[i] - zoom) < std::abs(ZL[best] - zoom)) best = i; return best; }
+    void stepZoom(int d, float lx, float ly) { setZoom(ZL[std::clamp(zoomIndex() + d, 0, NZL - 1)], lx, ly); }
+    void stepZoomCenter(int d) { stepZoom(d, viewW / 2.f, viewY + viewH / 2.f); }
     void clampCam() {
         zoom = std::clamp(zoom, minZoom(), maxZoom());
         float vw = (float)viewW / zoom, vh = (float)viewH / zoom;
@@ -72,7 +81,7 @@ struct Game {
     bool inView(float lx, float ly) const { return ly >= viewY && ly < viewY + viewH && lx >= 0 && lx < viewW; }
     void toWorld(float lx, float ly, float& wx, float& wy) const { wx = camX + lx / zoom; wy = camY + (ly - viewY) / zoom; }
     void toTile(float lx, float ly, int& tx, int& ty) const { float wx, wy; toWorld(lx, ly, wx, wy); tx = (int)std::floor(wx / TILE_PX); ty = (int)std::floor(wy / TILE_PX); }
-    void setZoom(int z, float lx, float ly) {
+    void setZoom(float z, float lx, float ly) {
         float wx, wy; toWorld(lx, ly, wx, wy);
         zoom = std::clamp(z, minZoom(), maxZoom());
         camX = wx - lx / zoom; camY = wy - (ly - viewY) / zoom; clampCam();
@@ -304,6 +313,14 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
         text(ren, 3, ly, l.text.find('!') != std::string::npos ? UI_WARN : 0xc7dcd0, s);
         shown++;
     }
+    {   // zoom buttons, right edge of the map just above the drawer
+        float bs = 30.f, bx = g.scrW - pad - bs, by = drawerTop - pad - bs;
+        SDL_FRect zo{bx, by, bs, bs}, zi{bx, by - bs - 4.f, bs, bs};
+        g.btns.push_back({zi, B_ZIN}); g.btns.push_back({zo, B_ZOUT});
+        bool canIn = g.zoom < g.maxZoom() - 1e-3f, canOut = g.zoom > g.minZoom() + 1e-3f;
+        button(ren, zi, UI_PANEL, false, UI_TEXT); text(ren, zi.x + 7, zi.y + 7, canIn ? UI_TEXT : UI_DIM, "+", 2.f);
+        button(ren, zo, UI_PANEL, false, UI_TEXT); text(ren, zo.x + 7, zo.y + 7, canOut ? UI_TEXT : UI_DIM, "-", 2.f);
+    }
     if (!g.toast.empty() && SDL_GetTicks() < g.toastUntil) {
         float tw = 8.f * g.toast.size() + 10.f, tx = (g.scrW - tw) / 2.f, ty = drawerTop - 18.f;
         rect(ren, tx, ty, tw, 13, 0x14101a, 220);
@@ -361,6 +378,8 @@ static int hitButton(const Game& g, float lx, float ly) {
 static void pressButton(Game& g, int id) {
     World& w = *g.world;
     if (id == B_SPEED) g.cycleSpeed();
+    else if (id == B_ZIN) g.stepZoomCenter(+1);
+    else if (id == B_ZOUT) g.stepZoomCenter(-1);
     else if (id == B_RESTART) g.restart(g.seed + 1);
     else if (id >= B_TAB0 && id < B_TAB0 + 4) { g.tab = g.tab == id - B_TAB0 ? -1 : id - B_TAB0; if (g.tool != Tool::Place) g.cancelTool(); }
     else if (id == B_ROAD) { bool on = g.tool == Tool::Road; g.cancelTool(); g.selected = -1; if (!on) { g.tool = Tool::Road; g.tab = -1; } }
@@ -396,7 +415,7 @@ static void mapTap(Game& g, float lx, float ly, bool mouse) {
 struct TouchState {
     SDL_FingerID id[2]{}; float x[2]{}, y[2]{};
     int n = 0; float downX = 0, downY = 0; bool moved = false, onUi = false;
-    float pinchStart = 0; int zoomStart = 0; float midX = 0, midY = 0;
+    float pinchStart = 0; float zoomStart = 1; float midX = 0, midY = 0;
     static constexpr float LIFT = 24.f;
 };
 static TouchState touch;
@@ -443,7 +462,8 @@ static void handleTouch(SDL_Renderer* ren, Game& g, const SDL_Event& e) {
             touch.midX = mx; touch.midY = my;
             if (touch.pinchStart > 1.f) {
                 float d = std::hypot(touch.x[1] - touch.x[0], touch.y[1] - touch.y[0]);
-                int z = touch.zoomStart + (int)std::lround(std::log2(d / touch.pinchStart) * 2.f);
+                float want = touch.zoomStart * d / touch.pinchStart, z = Game::ZL[0];   // snap to the nearest step
+                for (float s : Game::ZL) if (std::abs(std::log2(s / want)) < std::abs(std::log2(z / want))) z = s;
                 if (z != g.zoom) g.setZoom(z, mx, my);
             }
         }
@@ -480,7 +500,7 @@ static void relayout(SDL_Renderer* ren, Game& g) {
 
 int main(int argc, char** argv) {
     const char* shotPath = nullptr;
-    int shotDays = 0; bool demo = false;
+    int shotDays = 0; bool demo = false; float shotZoom = 0.f;
     std::string shotUi = "well";
     int winW = 324, winH = 702;   // portrait phone shape on desktop
     uint32_t seed = (uint32_t)std::time(nullptr);
@@ -490,10 +510,11 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--size") && i + 1 < argc) std::sscanf(argv[++i], "%dx%d", &winW, &winH);
         else if (!std::strcmp(argv[i], "--seed") && i + 1 < argc) seed = (uint32_t)std::strtoul(argv[++i], nullptr, 10);
         else if (!std::strcmp(argv[i], "--demo")) demo = true;
+        else if (!std::strcmp(argv[i], "--zoom") && i + 1 < argc) shotZoom = (float)std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--ui") && i + 1 < argc) shotUi = argv[++i];
         else if (!std::strcmp(argv[i], "--help")) {
             std::printf("villagesim [--seed N] [--size WxH]\n"
-                        "  --shot out.bmp [--days N] [--demo] [--ui none|well|road|info]  render one frame and exit\n"
+                        "  --shot out.bmp [--days N] [--demo] [--ui none|well|road|info] [--zoom 0.5..4]  render one frame and exit\n"
                         "  --demo  a scripted player builds the town during --days (for screenshots)\n");
             return 0;
         }
@@ -515,7 +536,8 @@ int main(int argc, char** argv) {
     g.best = loadBest();
     g.restart(seed);
     relayout(ren, g);
-    g.zoom = g.minZoom();
+    g.zoom = std::max(1.f, g.minZoom());
+    if (shotZoom > 0.f) g.zoom = shotZoom;
     g.centerOnHall();
     if (shotPath) {
         World& w = *g.world;
@@ -576,7 +598,7 @@ int main(int argc, char** argv) {
                 mouseDown = false;
             } else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
                 float lx, ly; SDL_RenderCoordinatesFromWindow(ren, e.wheel.mouse_x, e.wheel.mouse_y, &lx, &ly);
-                if (e.wheel.y > 0) g.setZoom(g.zoom + 1, lx, ly); else if (e.wheel.y < 0) g.setZoom(g.zoom - 1, lx, ly);
+                if (e.wheel.y > 0) g.stepZoom(+1, lx, ly); else if (e.wheel.y < 0) g.stepZoom(-1, lx, ly);
             } else if (e.type == SDL_EVENT_MOUSE_MOTION) {
                 float lx, ly; SDL_RenderCoordinatesFromWindow(ren, e.motion.x, e.motion.y, &lx, &ly);
                 if (e.motion.state & (SDL_BUTTON_RMASK | SDL_BUTTON_MMASK)) {
@@ -625,6 +647,7 @@ int main(int argc, char** argv) {
         SDL_RenderClear(ren);
         SDL_FRect dst{0, (float)g.viewY, (float)g.viewW, (float)g.viewH};
         SDL_FRect src{g.camX, g.camY, (float)g.viewW / g.zoom, (float)g.viewH / g.zoom};
+        SDL_SetTextureScaleMode(tex, g.zoom < 1.f ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);   // smooth when zoomed out
         SDL_RenderTexture(ren, tex, &src, &dst);
         ui(ren, g, true);
         if (shotPath) {
