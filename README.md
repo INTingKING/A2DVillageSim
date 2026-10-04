@@ -5,15 +5,15 @@ Your villagers farm, chop wood, build houses and raise kids on their own. The wo
 droughts, plagues, wildfires, raiders, locusts and blizzards at them, more often the longer you survive.
 You spend mana on four powers to keep them going. Your score is the number of days your civilization survives.
 
-<img src="docs/screenshot-phone.png" width="270" alt="Portrait phone layout"> <img src="docs/screenshot.png" width="480" alt="Landscape">
+<img src="docs/screenshot-phone.png" width="270" alt="Wildfire on day 11"> <img src="docs/screenshot-raiders.png" width="270" alt="Raiders arrow on day 15">
 
 ## Controls
 
-It's built as a **phone game**: the layout adapts to any screen size or orientation (whole-number pixel scale,
+It's a **vertical (portrait-only) phone game** on a tall 64×120 tile map: the layout adapts to any phone size (whole-number pixel scale,
 short side about 270 game pixels, safe-area aware), and the HUD wraps into finger-sized buttons on narrow screens.
 
-**Touch:** tap a power button, then tap the map to cast. Drag with one finger to pan, pinch to zoom.
-Tap the speed button to cycle x1, x2, x4, x8, pause. Tap anywhere after game over for a new world.
+**Touch:** tap a power button, then tap the map to cast, or hold still for a moment to aim with the ring floating above your thumb and lift to cast. Drag with one finger to pan, pinch to zoom.
+Tap the speed button to cycle x1, x2, x4, x8, pause. Tap anywhere after game over for a new world. Coloured arrows at the screen edge point to off-screen fire (orange), plague (green) and raiders (red). The game pauses itself when the app goes to the background.
 
 **Desktop (for testing):**
 

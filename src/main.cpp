@@ -69,7 +69,11 @@ struct Game {
     void restart(uint32_t s) { seed = s; world = std::make_unique<World>(s, true); bestSaved = false; centerOnHall(); }
 };
 
+// 1px dark outline so text reads in sunlight over any terrain.
 static void text(SDL_Renderer* r, float x, float y, uint32_t rgb, const std::string& s) {
+    SDL_SetRenderDrawColor(r, 0x14, 0x10, 0x18, 255);
+    const float o[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+    for (auto& d : o) SDL_RenderDebugText(r, x + d[0], y + d[1], s.c_str());
     SDL_SetRenderDrawColor(r, (rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255, 255);
     SDL_RenderDebugText(r, x, y, s.c_str());
 }
@@ -117,7 +121,7 @@ static std::vector<HudItem> hudItems(const Game& g, int& statCount) {
 static int layoutHud(SDL_Renderer* ren, Game& g, bool draw) {
     int statCount;
     auto items = hudItems(g, statCount);
-    const float rowH = 11.f, btnH = 18.f;
+    const float rowH = 11.f, btnH = 28.f;   // ~48dp thumb targets at typical phone scales
     float top = (float)(g.scrH - g.hudH) + 3.f;
     Flow f(3.f, top, (float)g.scrW - 3.f, rowH);
     const World& w = *g.world;
@@ -126,11 +130,11 @@ static int layoutHud(SDL_Renderer* ren, Game& g, bool draw) {
         SDL_FRect r = f.place(8.f * h.s.size(), 12.f);
         if (draw) text(ren, r.x, r.y + 1, h.col, h.s);
     }
-    Flow b(3.f, f.bottom() + 1.f, (float)g.scrW - 3.f, btnH + 3.f);
+    Flow b(3.f, f.bottom() + 2.f, (float)g.scrW - 3.f, btnH + 4.f);
     for (int i = statCount; i < (int)items.size(); i++) {
         const HudItem& h = items[i];
         float tw = 8.f * h.s.size();
-        SDL_FRect r = b.place(tw + 10.f, 3.f);
+        SDL_FRect r = b.place(tw + 12.f, 4.f);
         SDL_FRect hit{r.x, r.y, r.w, btnH};
         if (h.power >= 0) g.powerBtn[h.power] = hit; else g.speedBtn = hit;
         if (!draw) continue;
@@ -152,6 +156,56 @@ static void drawHud(SDL_Renderer* ren, Game& g) {
     rect(ren, 0, (float)g.viewH, (float)g.scrW, 2, 0x323353);
     rect(ren, 0, (float)g.viewH, g.scrW * w.mana / 100.f, 2, 0x905ea9);
     layoutHud(ren, g, true);
+
+    // Off-screen danger arrows: orange fire, green plague, red raiders.
+    {
+        struct Acc { float x = 0, y = 0; int n = 0; uint32_t col; } acc[3];
+        acc[0].col = 0xfb6b1d; acc[1].col = 0x9cdb43; acc[2].col = 0xe83b3b;
+        float vx0 = g.camX, vy0 = g.camY, vx1 = g.camX + (float)g.viewW / g.zoom, vy1 = g.camY + (float)g.viewH / g.zoom;
+        auto off = [&](float px, float py) { return px < vx0 || px >= vx1 || py < vy0 || py >= vy1; };
+        for (int y = 0; y < MAP_H; y++)
+            for (int x = 0; x < MAP_W; x++)
+                if (w.at(x, y).fire > 0.f) {
+                    float px = x * TILE_PX + 2.f, py = y * TILE_PX + 2.f;
+                    if (off(px, py)) { acc[0].x += px; acc[0].y += py; acc[0].n++; }
+                }
+        for (const Villager& v : w.villagers)
+            if (v.alive && v.sick) {
+                float px = v.x * TILE_PX + 2.f, py = v.y * TILE_PX + 2.f;
+                if (off(px, py)) { acc[1].x += px; acc[1].y += py; acc[1].n++; }
+            }
+        for (const Raider& r : w.raiders)
+            if (r.alive) {
+                float px = r.x * TILE_PX + 2.f, py = r.y * TILE_PX + 2.f;
+                if (off(px, py)) { acc[2].x += px; acc[2].y += py; acc[2].n++; }
+            }
+        float cx = g.viewW / 2.f, cy = g.viewH / 2.f;
+        for (auto& a : acc) {
+            if (!a.n) continue;
+            float sx = (a.x / a.n - g.camX) * g.zoom, sy = (a.y / a.n - g.camY) * g.zoom;
+            float dx = sx - cx, dy = sy - cy, len = std::hypot(dx, dy);
+            if (len < 1.f) continue;
+            dx /= len; dy /= len;
+            float m = 9.f, ex = cx - m - g.safeTop * 0.f, ey = cy - m;
+            float t = std::min(std::abs(dx) > 1e-4f ? (cx - m) / std::abs(dx) : 1e9f,
+                               std::abs(dy) > 1e-4f ? (cy - m - (dy < 0 ? g.safeTop : 0)) / std::abs(dy) : 1e9f);
+            (void)ex; (void)ey;
+            float ax = cx + dx * t, ay = cy + dy * t;
+            // filled triangle pointing outwards
+            SDL_FColor c{((a.col >> 16) & 255) / 255.f, ((a.col >> 8) & 255) / 255.f, (a.col & 255) / 255.f, 1.f};
+            SDL_FColor k{0.08f, 0.06f, 0.09f, 1.f};
+            float px = -dy, py = dx;
+            auto tri = [&](float s, SDL_FColor col) {
+                SDL_Vertex vt[3] = {
+                    {{ax + dx * 6 * s, ay + dy * 6 * s}, col, {0, 0}},
+                    {{ax - dx * 4 * s + px * 5 * s, ay - dy * 4 * s + py * 5 * s}, col, {0, 0}},
+                    {{ax - dx * 4 * s - px * 5 * s, ay - dy * 4 * s - py * 5 * s}, col, {0, 0}}};
+                SDL_RenderGeometry(ren, nullptr, vt, 3, nullptr, 0);
+            };
+            tri(1.35f, k);
+            tri(1.f, c);
+        }
+    }
 
     // recent events (top-left), fading after ~2 days
     size_t maxChars = (size_t)std::max(8, (g.scrW - 8) / 8);
@@ -217,6 +271,8 @@ struct TouchState {
     int n = 0;
     float downX = 0, downY = 0; bool moved = false;
     float pinchStart = 0; int zoomStart = 0;
+    uint64_t downTime = 0; bool aiming = false;
+    static constexpr float AIM_LIFT = 28.f;   // ring floats this far above the finger
 };
 static TouchState touch;
 
@@ -246,9 +302,10 @@ static void handleTouch(SDL_Renderer* ren, Game& g, const SDL_Event& e) {
         if (touch.n >= 2) return;
         slot = touch.n++;
         touch.id[slot] = f.fingerID; touch.x[slot] = lx; touch.y[slot] = ly;
-        if (touch.n == 1) { touch.downX = lx; touch.downY = ly; touch.moved = false; }
+        if (touch.n == 1) { touch.downX = lx; touch.downY = ly; touch.moved = false; touch.aiming = false; touch.downTime = SDL_GetTicks(); }
         else {
             touch.moved = true;   // a pinch is never a tap
+            touch.aiming = false;
             touch.pinchStart = std::hypot(touch.x[1] - touch.x[0], touch.y[1] - touch.y[0]);
             touch.zoomStart = g.zoom;
         }
@@ -256,6 +313,7 @@ static void handleTouch(SDL_Renderer* ren, Game& g, const SDL_Event& e) {
         float dx = lx - touch.x[slot], dy = ly - touch.y[slot];
         touch.x[slot] = lx; touch.y[slot] = ly;
         if (touch.n == 1) {
+            if (touch.aiming) return;   // ring follows the finger; no panning while aiming
             if (std::hypot(lx - touch.downX, ly - touch.downY) > 6.f) touch.moved = true;
             if (touch.moved) { g.camX -= dx / g.zoom; g.camY -= dy / g.zoom; g.clampCam(); }
         } else if (touch.pinchStart > 1.f) {
@@ -264,7 +322,14 @@ static void handleTouch(SDL_Renderer* ren, Game& g, const SDL_Event& e) {
             if (z != g.zoom) g.setZoom(z, (touch.x[0] + touch.x[1]) / 2, (touch.y[0] + touch.y[1]) / 2);
         }
     } else if (e.type == SDL_EVENT_FINGER_UP && slot >= 0) {
-        if (touch.n == 1 && !touch.moved) tapAt(g, lx, ly);
+        if (touch.n == 1 && touch.aiming) {
+            float ay = ly - TouchState::AIM_LIFT;
+            if (ay >= 0 && ay < g.viewH) {
+                float wx, wy; g.toWorld(lx, ay, wx, wy);
+                g.world->cast((Power)g.power, (int)(wx / TILE_PX), (int)(wy / TILE_PX));
+            }
+            touch.aiming = false;
+        } else if (touch.n == 1 && !touch.moved) tapAt(g, lx, ly);
         touch.id[slot] = touch.id[touch.n - 1]; touch.x[slot] = touch.x[touch.n - 1]; touch.y[slot] = touch.y[touch.n - 1];
         touch.n--;
         if (touch.n == 1) { touch.downX = touch.x[0]; touch.downY = touch.y[0]; }
@@ -274,7 +339,7 @@ static void handleTouch(SDL_Renderer* ren, Game& g, const SDL_Event& e) {
 int main(int argc, char** argv) {
     const char* shotPath = nullptr;
     int shotDays = 0;
-    int winW = SCREEN_W * 3, winH = SCREEN_H * 3;
+    int winW = 324, winH = 702;   // portrait phone shape (iPhone-ish 9:19.5) on desktop
     uint32_t seed = (uint32_t)std::time(nullptr);
     for (int i = 1; i < argc; i++) {
         if (!std::strcmp(argv[i], "--shot") && i + 1 < argc) shotPath = argv[++i];
@@ -291,7 +356,7 @@ int main(int argc, char** argv) {
         SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
     }
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
-    SDL_SetHint(SDL_HINT_ORIENTATIONS, "Portrait PortraitUpsideDown LandscapeLeft LandscapeRight");
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "Portrait");   // vertical-only game
     if (!SDL_Init(SDL_INIT_VIDEO)) { std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError()); return 1; }
     SDL_Window* win = nullptr; SDL_Renderer* ren = nullptr;
     if (!SDL_CreateWindowAndRenderer("A2D Village Sim", winW, winH, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY, &win, &ren)) {
@@ -322,6 +387,7 @@ int main(int argc, char** argv) {
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) running = false;
             else if (e.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || e.type == SDL_EVENT_WINDOW_SAFE_AREA_CHANGED) relayout(ren, g);
+            else if (e.type == SDL_EVENT_WILL_ENTER_BACKGROUND || e.type == SDL_EVENT_DID_ENTER_BACKGROUND) g.paused = true;
             else if (e.type == SDL_EVENT_FINGER_DOWN || e.type == SDL_EVENT_FINGER_MOTION || e.type == SDL_EVENT_FINGER_UP)
                 handleTouch(ren, g, e);
             else if (e.type == SDL_EVENT_KEY_DOWN) {
@@ -386,6 +452,14 @@ int main(int argc, char** argv) {
         SDL_RenderCoordinatesFromWindow(ren, wx, wy, &lx, &ly);
         float cwx = -100, cwy = -100;
         if (ly >= 0 && ly < g.viewH) g.toWorld(lx, ly, cwx, cwy);
+        // touch: hold still on the map for 180 ms to aim; the ring sits above the finger
+        if (touch.n == 1 && !touch.moved && !touch.aiming && touch.downY < g.viewH && now - touch.downTime > 180)
+            touch.aiming = true;
+        if (touch.aiming) {
+            cwx = cwy = -100;
+            float ay = touch.y[0] - TouchState::AIM_LIFT;
+            if (ay >= 0 && ay < g.viewH) g.toWorld(touch.x[0], ay, cwx, cwy);
+        } else if (touch.n > 0) cwx = cwy = -100;
         if (shotPath) { cwx = g.world->hallX * TILE_PX + 30.f; cwy = g.world->hallY * TILE_PX + 8.f; }
 
         void* pixels; int pitch;

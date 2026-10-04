@@ -9,8 +9,8 @@
 
 namespace sim {
 
-constexpr int MAP_W = 120;
-constexpr int MAP_H = 64;
+constexpr int MAP_W = 64;    // portrait map: fills a phone held upright
+constexpr int MAP_H = 120;
 constexpr int TICKS_PER_DAY = 240;   // 10 ticks/s at 1x -> 24 s per day
 constexpr int DAYS_PER_SEASON = 6;
 
