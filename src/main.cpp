@@ -73,6 +73,7 @@ struct Game {
     int best = 0, bestDaily = 0; bool bestSaved = false; uint32_t seed = 1; bool daily = false;
     Event warnedFor = Event::None;
     bool menu = false;   // start screen: Daily / New world
+    size_t logSeen = 0; std::string logText; uint64_t logAt = 0;
     float zoom = 2; float camX = 0, camY = 0;
     int scrW = 270, scrH = 585;
     int viewY = 0, viewW = 270, viewH = 400;   // map viewport between the top bar and the drawer
@@ -208,6 +209,18 @@ static std::vector<BType> tabItems(int c) {
     return v;
 }
 
+// 9x9 pixel icons for the top bar: 0 people, 1 food, 2 logs, 3 planks, 4 sick.
+static void statIcon(SDL_Renderer* r, float x, float y, int kind) {
+    auto p = [&](int px, int py, int w, int h, uint32_t c) { rect(r, x + px, y + py, (float)w, (float)h, c); };
+    switch (kind) {
+    case 0: p(3, 0, 3, 3, 0xf5c27a); p(2, 3, 5, 4, 0x4d9be6); p(2, 7, 2, 2, 0x3e3546); p(5, 7, 2, 2, 0x3e3546); break;
+    case 1: p(1, 3, 7, 5, 0xcd683d); p(2, 2, 5, 1, 0xe6904e); p(2, 4, 1, 1, 0xfbb954); p(5, 5, 1, 1, 0xfbb954); break;
+    case 2: p(0, 2, 9, 3, 0x7a4841); p(0, 5, 9, 3, 0x9e5b45); p(0, 2, 2, 3, 0xe6c89a); p(0, 5, 2, 3, 0xc09473); break;
+    case 3: p(0, 1, 9, 2, 0xe6c89a); p(0, 4, 9, 2, 0xc09473); p(0, 7, 9, 2, 0xe6c89a); break;
+    case 4: p(3, 0, 3, 9, 0x9cdb43); p(0, 3, 9, 3, 0x9cdb43); break;
+    }
+}
+
 // Lays out and draws all UI; fills g.btns and the map viewport. draw=false only measures.
 static void ui(SDL_Renderer* ren, Game& g, bool draw) {
     World& w = *g.world;
@@ -217,28 +230,27 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
     float y = (float)g.safeTop + pad;
     float topStart = 0;
     std::string dayS = "DAY " + std::to_string(w.day() + 1);
-    std::vector<std::pair<std::string, uint32_t>> stats = {
-        {"Pop " + std::to_string(w.population()) + "/" + std::to_string(w.housing()), UI_TEXT},
-        {"Bread " + std::to_string((int)w.store[(int)Res::Bread]), w.food() < w.population() * 2 ? UI_WARN : UI_TEXT},
-        {"Fish " + std::to_string((int)w.store[(int)Res::Fish]), UI_TEXT},
-        {"Logs " + std::to_string((int)w.store[(int)Res::Logs]), 0xc09473},
-        {"Planks " + std::to_string((int)w.store[(int)Res::Planks]), 0xe6c89a},
-        {"Wheat " + std::to_string((int)w.store[(int)Res::Wheat]), UI_DIM},
-        {"Flour " + std::to_string((int)w.store[(int)Res::Flour]), UI_DIM}};
-    if (w.jobsOpen() > 0) stats.push_back({"Jobs open " + std::to_string(w.jobsOpen()), UI_WARN});
-    if (w.sickCount() > 0) stats.push_back({"Sick " + std::to_string(w.sickCount()), 0x9cdb43});
-    // measure rows
-    float sx = pad, sy = y + 22.f; int rows = 1;
-    for (auto& s : stats) { float tw = 8.f * s.first.size(); if (sx > pad && sx + tw > g.scrW - pad) { sx = pad; sy += 11.f; rows++; } sx += tw + 10.f; }
-    float topH = g.safeTop + pad + 22.f + rows * 11.f + 3.f;
+    // one row of icon counters: people, food (bread + fish), logs, planks, and sick when there are any
+    struct Stat { int icon; std::string v; uint32_t col; };
+    std::vector<Stat> stats = {
+        {0, std::to_string(w.population()) + "/" + std::to_string(w.housing()), w.population() >= w.housing() ? UI_WARN : UI_TEXT},
+        {1, std::to_string((int)w.food()), w.food() < w.population() * 2 ? UI_BAD : UI_TEXT},
+        {2, std::to_string((int)w.store[(int)Res::Logs]), (w.season() == Season::Winter && w.store[(int)Res::Logs] < 8) ? UI_BAD : UI_TEXT},
+        {3, std::to_string((int)w.store[(int)Res::Planks]), UI_TEXT}};
+    if (w.sickCount() > 0) stats.push_back({4, std::to_string(w.sickCount()), 0x9cdb43});
+    float topH = g.safeTop + pad + 22.f + 13.f + 3.f;
     if (draw) {
         rect(ren, 0, topStart, (float)g.scrW, topH, UI_BG, 235);
         rect(ren, 0, topH - 1, (float)g.scrW, 1, 0x1d161f);
         text(ren, pad, y + 1, UI_TEXT, dayS, 2.f);
         text(ren, pad + 16.f * dayS.size() + 6.f, y + 5, UI_DIM, seasonName(w.season()));
         if (g.daily) text(ren, pad + 16.f * dayS.size() + 6.f + 8.f * (std::strlen(seasonName(w.season())) + 1), y + 5, UI_WARN, "DAILY");
-        sx = pad; sy = y + 22.f;
-        for (auto& s : stats) { float tw = 8.f * s.first.size(); if (sx > pad && sx + tw > g.scrW - pad) { sx = pad; sy += 11.f; } text(ren, sx, sy, s.second, s.first); sx += tw + 10.f; }
+        float cw = (g.scrW - 2 * pad) / (float)stats.size(), sy = y + 23.f;
+        for (size_t i = 0; i < stats.size(); i++) {
+            float sx = pad + i * cw;
+            statIcon(ren, sx, sy, stats[i].icon);
+            text(ren, sx + 11, sy + 1, stats[i].col, stats[i].v);
+        }
     }
     {
         std::string sp = g.paused ? "PAUSE" : "x" + std::to_string(g.speed);
@@ -251,7 +263,7 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
     float bottom = (float)g.scrH - g.safeBottom;
     float tabsY = bottom - btnH - pad;
     std::vector<BType> cards = g.tab >= 0 ? tabItems(g.tab) : std::vector<BType>{};
-    float cardH = 46.f;
+    float cardH = 34.f;
     float cardsY = tabsY - (cards.empty() ? 0.f : cardH + pad);
     bool confirmRow = g.tool != Tool::None || g.selected >= 0;
     float confY = cardsY - (confirmRow ? btnH + pad : 0.f);
@@ -285,12 +297,23 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
             bool afford = w.canAfford(cards[i]);
             bool sel = g.tool == Tool::Place && g.placing == cards[i];
             button(ren, b, sel ? UI_SEL : UI_PANEL, sel, TAB_COL[g.tab]);
-            const BInfo& in = binfo(cards[i]);
             rect(ren, b.x + 3, b.y + 3, b.w - 6, 3, afford ? TAB_COL[g.tab] : 0x45394a);
             centered(ren, b, b.y + 10, afford ? UI_TEXT : 0x6d5f70, shortName(cards[i]));
-            centered(ren, b, b.y + 22, afford ? 0xe6c89a : UI_BAD, costStr(cards[i]));
-            std::string meta = std::to_string(in.w) + "x" + std::to_string(in.h) + (in.workers ? " " + std::to_string(in.workers) + "w" : "");
-            centered(ren, b, b.y + 33, afford ? UI_DIM : 0x6d5f70, meta);
+            {   // cost as icons: log + number, plank + number
+                const BInfo& in = binfo(cards[i]);
+                std::vector<std::pair<int, int>> parts;
+                if (in.costLogs) parts.push_back({2, in.costLogs});
+                if (in.costPlanks) parts.push_back({3, in.costPlanks});
+                float tw = 0; for (auto& pr : parts) tw += 11 + 8.f * std::to_string(pr.second).size() + 6;
+                float cx = b.x + (b.w - tw + 6) / 2, cy = b.y + 20;
+                for (auto& pr : parts) {
+                    bool enough = w.store[pr.first == 2 ? (int)Res::Logs : (int)Res::Planks] >= pr.second;
+                    statIcon(ren, cx, cy, pr.first);
+                    std::string n = std::to_string(pr.second);
+                    text(ren, cx + 11, cy + 1, enough ? UI_TEXT : UI_BAD, n);
+                    cx += 11 + 8.f * n.size() + 6;
+                }
+            }
         }
     }
     // confirm row: status text on the left, Cancel / Build on the right (no stray taps waste goods)
@@ -361,18 +384,21 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
         text(ren, cx + 8, cy + 4, c, msg);
         logY = cy + 19.f;
     }
-    // ---- event log under the top bar
-    size_t maxChars = (size_t)std::max(8, (g.scrW - 8) / 8);
-    int shown = 0;
-    for (int i = (int)w.log.size() - 1; i >= 0 && shown < 3; i--) {
-        const LogLine& l = w.log[i];
-        if (w.day() + 1 - l.day > 2) break;
-        std::string s = "D" + std::to_string(l.day) + " " + l.text;
-        if (s.size() > maxChars) s = s.substr(0, maxChars);
-        float ly = logY + shown * 10.f;
-        rect(ren, 1, ly - 1, 8.f * s.size() + 4, 10, 0x000000, 140);
-        text(ren, 3, ly, l.text.find('!') != std::string::npos ? UI_WARN : 0xc7dcd0, s);
-        shown++;
+    // ---- latest message: one line under the top bar that fades after a few seconds
+    if (!w.log.empty()) {
+        if (w.log.size() != g.logSeen || w.log.back().text != g.logText) { g.logSeen = w.log.size(); g.logText = w.log.back().text; g.logAt = SDL_GetTicks(); }
+        uint64_t age = SDL_GetTicks() - g.logAt;
+        if (age < 4000) {
+            size_t maxChars = (size_t)std::max(8, (g.scrW - 12) / 8);
+            std::string m = g.logText.size() > maxChars ? g.logText.substr(0, maxChars) : g.logText;
+            float a = age < 3000 ? 1.f : 1.f - (age - 3000) / 1000.f;
+            bool bad = m.find('!') != std::string::npos;
+            uint32_t c = bad ? UI_WARN : 0xc7dcd0;
+            float mw = 8.f * m.size() + 8.f;
+            rect(ren, (g.scrW - mw) / 2, logY - 1, mw, 11, 0x000000, (uint8_t)(150 * a));
+            SDL_SetRenderDrawColor(ren, 0, 0, 0, 0);
+            if (a > 0.35f) text(ren, (g.scrW - mw) / 2 + 4, logY, c, m);
+        }
     }
     {   // zoom buttons, right edge of the map just above the drawer
         float bs = 30.f, bx = g.scrW - pad - bs, by = drawerTop - pad - bs;
