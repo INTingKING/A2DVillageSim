@@ -60,7 +60,7 @@ struct Game {
     std::vector<Btn> btns;
 
     int minZoom() const { int zx = (viewW + VIEW_W - 1) / VIEW_W, zy = (viewH + VIEW_H - 1) / VIEW_H; return std::max(1, std::max(zx, zy)); }
-    int maxZoom() const { return minZoom() + 4; }
+    int maxZoom() const { return minZoom() + 3; }
     void clampCam() {
         zoom = std::clamp(zoom, minZoom(), maxZoom());
         float vw = (float)viewW / zoom, vh = (float)viewH / zoom;
@@ -315,9 +315,9 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
         acc[0].col = 0xfb6b1d; acc[1].col = 0x9cdb43; acc[2].col = 0xe83b3b;
         float vx0 = g.camX, vy0 = g.camY, vx1 = g.camX + (float)g.viewW / g.zoom, vy1 = g.camY + (float)g.viewH / g.zoom;
         auto add = [&](int k, float px, float py) { if (px < vx0 || px >= vx1 || py < vy0 || py >= vy1) { acc[k].x += px; acc[k].y += py; acc[k].n++; } };
-        for (int ty = 0; ty < MAP_H; ty++) for (int tx = 0; tx < MAP_W; tx++) if (w.at(tx, ty).fire > 0.f) add(0, tx * 8 + 4.f, ty * 8 + 4.f);
-        for (auto& v : w.villagers) if (v.alive && v.sick) add(1, v.x * 8 + 4.f, v.y * 8 + 4.f);
-        for (auto& r : w.raiders) if (r.alive) add(2, r.x * 8 + 4.f, r.y * 8 + 4.f);
+        for (int ty = 0; ty < MAP_H; ty++) for (int tx = 0; tx < MAP_W; tx++) if (w.at(tx, ty).fire > 0.f) add(0, tx * TILE_PX + 8.f, ty * TILE_PX + 8.f);
+        for (auto& v : w.villagers) if (v.alive && v.sick) add(1, v.x * TILE_PX + 8.f, v.y * TILE_PX + 8.f);
+        for (auto& r : w.raiders) if (r.alive) add(2, r.x * TILE_PX + 8.f, r.y * TILE_PX + 8.f);
         float cx = g.viewW / 2.f, cy = g.viewY + g.viewH / 2.f;
         for (auto& a : acc) {
             if (!a.n) continue;
@@ -515,7 +515,7 @@ int main(int argc, char** argv) {
     g.best = loadBest();
     g.restart(seed);
     relayout(ren, g);
-    g.zoom = std::max(g.minZoom(), 2);
+    g.zoom = g.minZoom();
     g.centerOnHall();
     if (shotPath) {
         World& w = *g.world;
@@ -617,6 +617,8 @@ int main(int argc, char** argv) {
 
         ui(ren, g, false);   // measure first so the map viewport is right this frame
         g.clampCam();
+        ov.vx0 = (int)g.camX - 1; ov.vy0 = (int)g.camY - 1;
+        ov.vx1 = (int)(g.camX + (float)g.viewW / g.zoom) + 2; ov.vy1 = (int)(g.camY + (float)g.viewH / g.zoom) + 2;
         void* pixels; int pitch;
         if (SDL_LockTexture(tex, nullptr, &pixels, &pitch)) { drawWorld(*g.world, (uint32_t*)pixels, pitch / 4, frame, ov); SDL_UnlockTexture(tex); }
         SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);

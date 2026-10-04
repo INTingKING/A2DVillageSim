@@ -53,7 +53,7 @@ Android/iOS packaging isn't set up yet; SDL3 supports both, so that's the next b
 ## Layout
 
 - `src/world.*`: the simulation (no SDL), covering map gen, buildings, roads, production chains, villagers, seasons and disasters.
-- `src/render.*`: draws the world into a pixel buffer (8×8 px tiles, Resurrect 64 colours, day/night tint, ghost, coverage circles, need bubbles).
+- `src/render.*`: draws the world into a pixel buffer (16×16 px tiles, Resurrect 64 colours, day/night tint, ghost, coverage circles, need bubbles).
 - `src/main.cpp`: SDL3 window, touch and mouse input, camera, top bar and build drawer.
 - `src/autoplay.hpp`: a scripted player used by the self-test and `--demo` screenshots.
 - `src/selftest.cpp`: balance checks. Chains produce, a peaceful town survives 60 days, an idle town falls (but not instantly), and safety buildings help against disasters.

@@ -3,10 +3,10 @@
 #include <cstdint>
 #include <vector>
 
-// Draws the world into a 32-bit XRGB pixel buffer, 8x8 pixels per tile.
-constexpr int TILE_PX = 8;
-constexpr int VIEW_W = sim::MAP_W * TILE_PX;   // 512
-constexpr int VIEW_H = sim::MAP_H * TILE_PX;   // 960
+// Draws the world into a 32-bit XRGB pixel buffer, 16x16 pixels per tile.
+constexpr int TILE_PX = 16;
+constexpr int VIEW_W = sim::MAP_W * TILE_PX;   // 1024
+constexpr int VIEW_H = sim::MAP_H * TILE_PX;   // 1920
 
 // What the UI wants drawn on top of the world (placement ghost, road preview, demolish target).
 struct Overlay {
@@ -17,6 +17,8 @@ struct Overlay {
     std::vector<int> roadTiles;   // tiles painted in the current drag (preview)
     int demolishX = -1, demolishY = -1;
     int selected = -1;         // building index tapped for info
+    // visible part of the world in world pixels; only this region is redrawn
+    int vx0 = 0, vy0 = 0, vx1 = VIEW_W, vy1 = VIEW_H;
 };
 
 void drawWorld(const sim::World& w, uint32_t* px, int pitchPx, int frame, const Overlay& ov);
