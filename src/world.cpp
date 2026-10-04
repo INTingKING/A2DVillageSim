@@ -63,7 +63,37 @@ const char* categoryName(Category c) {
     return n[(int)c];
 }
 
-World::World(uint32_t seed, bool disasters) : disastersOn(disasters), rng(seed) { generate(); }
+World::World(uint32_t seed, bool disasters) : disastersOn(disasters), rng(seed) {
+    generate();
+    note("The town was founded by " + std::to_string(population()) + " villagers.");
+    popMark = population();
+}
+
+int World::dangerLevel() const { return day() / 10; }
+
+const char* World::warnText(Event e, int side) {
+    switch (e) {
+    case Event::Raiders: return side < 0 ? "Raiders spotted in the west" : "Raiders spotted in the east";
+    case Event::Wildfire: return "Smoke on the wind";
+    case Event::Plague: return "A cough is spreading";
+    case Event::Drought: return "The air is turning dry";
+    case Event::Locusts: return "A swarm is coming";
+    case Event::Blizzard: return "Dark clouds gather";
+    default: return "";
+    }
+}
+
+static const char* storyName(Event e) {
+    switch (e) {
+    case Event::Raiders: return "Raiders";
+    case Event::Wildfire: return "A great fire";
+    case Event::Plague: return "The plague";
+    case Event::Drought: return "The drought";
+    case Event::Locusts: return "The locusts";
+    case Event::Blizzard: return "The blizzard";
+    default: return "Hunger and cold";
+    }
+}
 
 float World::frand(float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng); }
 int World::irand(int a, int b) { return std::uniform_int_distribution<int>(a, b)(rng); }
@@ -182,6 +212,12 @@ bool World::place(BType t, int x, int y) {
     if (over || !canPlace(t, x, y) || !canAfford(t)) return false;
     const BInfo& b = binfo(t);
     store[(int)Res::Logs] -= b.costLogs; store[(int)Res::Planks] -= b.costPlanks;
+    // story-worthy firsts only (the basic camps and houses come too early to be interesting)
+    if (!built[(int)t] && (t == BType::Mill || t == BType::Bakery || t == BType::Well || t == BType::Healer || t == BType::Tower)) {
+        built[(int)t] = true;
+        std::string n = b.name; for (char& ch : n) ch = (char)std::tolower((unsigned char)ch);
+        note("Built the first " + n + ".");
+    }
     Building nb; nb.type = t; nb.x = x; nb.y = y;
     int idx = -1;
     for (int i = 0; i < (int)buildings.size(); i++) if (!buildings[i].alive) { idx = i; break; }
@@ -226,7 +262,7 @@ void World::destroyBuilding(int bi, const char* why) {
     const BInfo& b = binfo(bd.type);
     for (int dy = 0; dy < b.h; dy++)
         for (int dx = 0; dx < b.w; dx++) { Cell& c = at(bd.x + dx, bd.y + dy); c.t = Tile::Ash; c.res = 4.f; c.bld = -1; c.fire = 0.f; }
-    bd.alive = false;
+    bd.alive = false; lostToday++;
     say(std::string("A ") + b.name + " " + why + ".");
     refresh();
 }
@@ -331,7 +367,7 @@ void World::spawnVillager(float x, float y, float age) {
 
 void World::kill(Villager& v, const char* why) {
     if (!v.alive) return;
-    v.alive = false; deaths++;
+    v.alive = false; deaths++; diedToday++;
     say(std::string("A villager died: ") + why + ".");
 }
 
@@ -591,13 +627,14 @@ void World::updateTiles() {
 }
 
 void World::startEvent(Event e) {
+    lastEvent = e; lastEventDay = day();
     switch (e) {
     case Event::Drought:
-        droughtDays = irand(3, 6);
+        droughtDays = irand(3, 6) + dangerLevel() / 2;
         say("DROUGHT! Crops stop growing and fires spread fast.");
         break;
     case Event::Plague: {
-        int n = 1 + day() / 15, done = 0;
+        int n = 1 + day() / 14, done = 0;
         for (int tries = 0; tries < 50 && done < n && !villagers.empty(); tries++) {
             Villager& v = villagers[irand(0, (int)villagers.size() - 1)];
             if (v.alive && !v.sick) { v.sick = true; done++; }
@@ -606,7 +643,7 @@ void World::startEvent(Event e) {
         break;
     }
     case Event::Wildfire: {
-        int n = irand(1, 2 + day() / 20), lit = 0;
+        int n = irand(1 + dangerLevel() / 3, 2 + day() / 15), lit = 0;
         for (int tries = 0; tries < 400 && lit < n; tries++) {
             int x = hallX + irand(-22, 24), y = hallY + irand(-30, 32);
             if (!inside(x, y)) continue;
@@ -617,8 +654,8 @@ void World::startEvent(Event e) {
         break;
     }
     case Event::Raiders: {
-        int n = 2 + day() / 8;
-        bool left = frand() < 0.5f;
+        int n = 2 + day() / 7 + std::max(0, day() - 40) / 5;
+        bool left = pendingSide < 0;
         for (int i = 0; i < n; i++) {
             Raider r;
             r.x = left ? 0.f : (float)(MAP_W - 1);
@@ -635,7 +672,7 @@ void World::startEvent(Event e) {
         break;
     }
     case Event::Blizzard:
-        blizzardDays = irand(2, 4);
+        blizzardDays = irand(2, 4) + dangerLevel() / 3;
         say("BLIZZARD! Houses burn double firewood.");
         break;
     default: break;
@@ -643,9 +680,13 @@ void World::startEvent(Event e) {
 }
 
 void World::rollEvent() {
-    if (!disastersOn || day() < 4) return;
-    float p = std::min(0.75f, 0.15f + day() * 0.011f);
-    if (frand() >= p) return;
+    if (!disastersOn || day() < 4 || pending != Event::None) return;
+    if (frand() >= std::min(0.9f, 0.15f + day() * 0.011f)) return;
+    rollEventNow();
+}
+
+// Picks a disaster for this season and announces it; it hits WARN_TICKS later.
+void World::rollEventNow() {
     Season s = season();
     struct W { Event e; float w; };
     std::vector<W> opts;
@@ -657,12 +698,18 @@ void World::rollEvent() {
     if (s == Season::Winter && blizzardDays <= 0) opts.push_back({Event::Blizzard, 2.f});
     float tot = 0.f; for (auto& o : opts) tot += o.w;
     float r = frand(0.f, tot);
-    for (auto& o : opts) if ((r -= o.w) <= 0.f) { startEvent(o.e); return; }
+    for (auto& o : opts) if ((r -= o.w) <= 0.f) {
+        pending = o.e; pendingTicks = WARN_TICKS;
+        pendingSide = o.e == Event::Raiders ? (frand() < 0.5f ? -1 : 1) : 0;
+        return;
+    }
 }
 
 void World::dawn() {
     Season s = season();
     if (day() % DAYS_PER_SEASON == 0 && day() > 0) say(std::string(seasonName(s)) + " begins.");
+    if (s == Season::Spring && day() % DAYS_PER_SEASON == 0 && day() > 0 && population() > 0)
+        history.push_back({day(), "Survived winter " + std::to_string(day() / (DAYS_PER_SEASON * 4)) + "."});
     int pop = population();
     // eat: bread first, then fish
     float need = (float)pop;
@@ -718,6 +765,25 @@ void World::dawn() {
     // compact villagers; fix job indices are building indices so they stay valid
     villagers.erase(std::remove_if(villagers.begin(), villagers.end(), [](const Villager& v) { return !v.alive; }), villagers.end());
     raiders.erase(std::remove_if(raiders.begin(), raiders.end(), [](const Raider& r) { return !r.alive; }), raiders.end());
+    // town story: big losses yesterday, growth milestones
+    if (lostToday >= 2 || diedToday >= 3) {
+        Event cause = day() - lastEventDay <= 2 ? lastEvent : Event::None;
+        if (lostToday && cause != Event::Wildfire && cause != Event::Drought) cause = Event::Wildfire;   // only fire burns buildings
+        // a disaster that keeps hitting for several days becomes one story line
+        bool merge = storyIdx == (int)history.size() - 1 && storyIdx >= 0 && storyCause == cause && day() - storyDay <= 2;
+        if (!merge) { storyLost = storyDied = 0; history.push_back({day(), ""}); storyIdx = (int)history.size() - 1; }
+        storyCause = cause; storyDay = day();
+        storyLost += lostToday; storyDied += diedToday;
+        std::string t = storyName(cause);
+        t += " took ";
+        if (storyLost) t += std::to_string(storyLost) + (storyLost == 1 ? " building" : " buildings");
+        if (storyLost && storyDied) t += " and ";
+        if (storyDied) t += std::to_string(storyDied) + (storyDied == 1 ? " life" : " lives");
+        history[storyIdx].text = t + ".";
+    }
+    lostToday = diedToday = 0;
+    for (int m : {10, 25, 50, 100, 200})
+        if (popMark < m && population() >= m) { history.push_back({day() + 1, "The town grew to " + std::to_string(m) + " people."}); popMark = m; }
     assignJobs();
     rollEvent();
 }
@@ -725,13 +791,18 @@ void World::dawn() {
 void World::tick() {
     if (over) return;
     if (ticks % TICKS_PER_DAY == 0) dawn();
+    // late game: a second disaster can be announced in the afternoon
+    if (disastersOn && ticks % TICKS_PER_DAY == TICKS_PER_DAY / 2 && pending == Event::None && day() > 35 &&
+        frand() < std::min(0.6f, (day() - 35) * 0.015f)) rollEventNow();
+    if (pending != Event::None && --pendingTicks <= 0) { Event e = pending; pending = Event::None; startEvent(e); }
     updateTiles();
     for (int i = 0; i < (int)villagers.size(); i++) if (villagers[i].alive) updateVillager(i);
     updateRaiders();
     if (ticks % 20 == 0) assignJobs();   // pick up newly grown-up or cured villagers
     ticks++;
     if (population() == 0) {
-        over = true;
+        over = true; pending = Event::None;
+        note("The last villager fell.");
         say("The last villager is gone. Your town lasted " + std::to_string(day()) + " days.");
     }
 }

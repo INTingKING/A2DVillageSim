@@ -21,8 +21,32 @@
 
 using namespace sim;
 
-static int loadBest() { std::ifstream f("best_score.txt"); int b = 0; if (f) f >> b; return b; }
-static void saveBest(int b) { std::ofstream f("best_score.txt"); f << b; }
+// Daily run: everyone gets the same world (and so the same disaster dice) on the same date.
+static uint32_t todaySeed() {
+    std::time_t t = std::time(nullptr); std::tm lt = *std::localtime(&t);
+    return (uint32_t)((lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday);
+}
+static std::string bestFile(bool daily) { return daily ? "best_daily_" + std::to_string(todaySeed()) + ".txt" : "best_score.txt"; }
+static int loadBest(bool daily = false) { std::ifstream f(bestFile(daily)); int b = 0; if (f) f >> b; return b; }
+static void saveBest(int b, bool daily = false) { std::ofstream f(bestFile(daily)); f << b; }
+
+static uint32_t eventColor(Event e) {
+    switch (e) {
+    case Event::Raiders: return 0xe83b3b;
+    case Event::Wildfire: case Event::Drought: return 0xfb6b1d;
+    case Event::Plague: case Event::Locusts: return 0x9cdb43;
+    case Event::Blizzard: return 0xc7dcd0;
+    default: return 0xffffff;
+    }
+}
+// Word-wraps s into lines of at most n characters.
+static std::vector<std::string> wrap(const std::string& s, size_t n) {
+    std::vector<std::string> out; std::string line, word;
+    auto flush = [&]() { if (!word.empty()) { if (!line.empty() && line.size() + 1 + word.size() > n) { out.push_back(line); line.clear(); } line += (line.empty() ? "" : " ") + word; word.clear(); } };
+    for (char c : s) { if (c == ' ') flush(); else word += c; }
+    flush(); if (!line.empty()) out.push_back(line);
+    return out;
+}
 
 // UI palette (Designer)
 constexpr uint32_t UI_BG = 0x2e222f, UI_PANEL = 0x3e3546, UI_SEL = 0x6b3e75, UI_TEXT = 0xffffff, UI_DIM = 0x9babb2,
@@ -30,7 +54,7 @@ constexpr uint32_t UI_BG = 0x2e222f, UI_PANEL = 0x3e3546, UI_SEL = 0x6b3e75, UI_
 static const uint32_t TAB_COL[4] = {0xb33831, 0xe0a83a, 0x5b6b2e, 0x5a6e9c};   // roof colours per category
 
 enum class Tool { None, Place, Road, Remove };
-enum BtnId { B_TAB0 = 0, B_ROAD = 10, B_REMOVE, B_CARD0 = 20, B_OK = 40, B_CANCEL, B_SPEED, B_RESTART, B_ZIN, B_ZOUT };
+enum BtnId { B_TAB0 = 0, B_ROAD = 10, B_REMOVE, B_CARD0 = 20, B_OK = 40, B_CANCEL, B_SPEED, B_RESTART, B_ZIN, B_ZOUT, B_DAILY };
 struct Btn { SDL_FRect r; int id; };
 
 static const char* shortName(BType t) {
@@ -46,7 +70,8 @@ static const char* tabName(int c) { static const char* n[4] = {"Home", "Food", "
 struct Game {
     std::unique_ptr<World> world;
     int speed = 1; bool paused = false;
-    int best = 0; bool bestSaved = false; uint32_t seed = 1;
+    int best = 0, bestDaily = 0; bool bestSaved = false; uint32_t seed = 1; bool daily = false;
+    Event warnedFor = Event::None;
     float zoom = 2; float camX = 0, camY = 0;
     int scrW = 270, scrH = 585;
     int viewY = 0, viewW = 270, viewH = 400;   // map viewport between the top bar and the drawer
@@ -95,7 +120,7 @@ struct Game {
         camX = wx - lx / zoom; camY = wy - (ly - viewY) / zoom; clampCam();
     }
     void cycleSpeed() { if (paused) { paused = false; speed = 1; } else if (speed >= 8) paused = true; else speed *= 2; }
-    void restart(uint32_t s) { seed = s; world = std::make_unique<World>(s, true); bestSaved = false; cancelTool(); tab = -1; centerOnHall(); }
+    void restart(uint32_t s, bool isDaily = false) { seed = s; daily = isDaily; warnedFor = Event::None; world = std::make_unique<World>(s, true); bestSaved = false; cancelTool(); tab = -1; centerOnHall(); }
     void say(const std::string& s) { toast = s; toastUntil = SDL_GetTicks() + 2500; }
     void cancelTool() { tool = Tool::None; ghostSet = false; roadDrag.clear(); painting = false; remX = remY = -1; }
     void startPlace(BType t) {
@@ -210,6 +235,7 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
         rect(ren, 0, topH - 1, (float)g.scrW, 1, 0x1d161f);
         text(ren, pad, y + 1, UI_TEXT, dayS, 2.f);
         text(ren, pad + 16.f * dayS.size() + 6.f, y + 5, UI_DIM, seasonName(w.season()));
+        if (g.daily) text(ren, pad + 16.f * dayS.size() + 6.f + 8.f * (std::strlen(seasonName(w.season())) + 1), y + 5, UI_WARN, "DAILY");
         sx = pad; sy = y + 22.f;
         for (auto& s : stats) { float tw = 8.f * s.first.size(); if (sx > pad && sx + tw > g.scrW - pad) { sx = pad; sy += 11.f; } text(ren, sx, sy, s.second, s.first); sx += tw + 10.f; }
     }
@@ -308,6 +334,32 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
     g.viewY = (int)topH; g.viewW = g.scrW; g.viewH = std::max(40, (int)drawerTop - (int)topH);
 
     if (!draw) return;
+    // ---- disaster warning: tint or edge glow on the map, and a countdown chip under the top bar
+    float logY = topH + 3.f;
+    if (w.pending != Event::None) {
+        uint32_t c = eventColor(w.pending);
+        float pulse = 0.5f + 0.5f * std::sin(SDL_GetTicks() * 0.008f);
+        uint8_t cr = (c >> 16) & 255, cg = (c >> 8) & 255, cb = c & 255;
+        if (w.pendingSide != 0) {   // glow on the edge they come from
+            for (int i = 0; i < 24; i++) {
+                float a = (1.f - i / 24.f) * (60.f + 70.f * pulse);
+                float x = w.pendingSide < 0 ? (float)i : (float)(g.viewW - 1 - i);
+                SDL_SetRenderDrawColor(ren, cr, cg, cb, (uint8_t)a);
+                SDL_FRect fr{x, (float)g.viewY, 1.f, (float)g.viewH}; SDL_RenderFillRect(ren, &fr);
+            }
+        } else {
+            SDL_SetRenderDrawColor(ren, cr, cg, cb, (uint8_t)(18.f + 22.f * pulse));
+            SDL_FRect fr{0, (float)g.viewY, (float)g.viewW, (float)g.viewH}; SDL_RenderFillRect(ren, &fr);
+        }
+        int secs = (w.pendingTicks + 9) / 10;
+        std::string msg = std::string(World::warnText(w.pending, w.pendingSide)) + "  " + std::to_string(secs) + "s";
+        float cw = 8.f * msg.size() + 12.f, cx = pad, cy = topH + 3.f;
+        rect(ren, cx, cy, cw, 15, 0x14101a, 235);
+        rect(ren, cx, cy, 3, 15, c);
+        rect(ren, cx + 3, cy + 14, (cw - 3) * w.pendingTicks / (float)WARN_TICKS, 1, c);
+        text(ren, cx + 8, cy + 4, c, msg);
+        logY = cy + 19.f;
+    }
     // ---- event log under the top bar
     size_t maxChars = (size_t)std::max(8, (g.scrW - 8) / 8);
     int shown = 0;
@@ -316,7 +368,7 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
         if (w.day() + 1 - l.day > 2) break;
         std::string s = "D" + std::to_string(l.day) + " " + l.text;
         if (s.size() > maxChars) s = s.substr(0, maxChars);
-        float ly = topH + 3.f + shown * 10.f;
+        float ly = logY + shown * 10.f;
         rect(ren, 1, ly - 1, 8.f * s.size() + 4, 10, 0x000000, 140);
         text(ren, 3, ly, l.text.find('!') != std::string::npos ? UI_WARN : 0xc7dcd0, s);
         shown++;
@@ -366,14 +418,37 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
     }
     if (w.gameOver()) {
         char buf[96];
-        float bw = std::min(250.f, g.scrW - 10.f), bh = 78, bx = (g.scrW - bw) / 2, by = g.viewY + (g.viewH - bh) / 2;
-        rect(ren, bx, by, bw, bh, UI_BG, 240);
-        text(ren, bx + 8, by + 8, UI_BAD, "YOUR TOWN FELL");
-        std::snprintf(buf, sizeof(buf), "Survived %d days", w.day()); text(ren, bx + 8, by + 24, UI_TEXT, buf);
-        std::snprintf(buf, sizeof(buf), "Best %d  Born %d  Died %d", g.best, w.births, w.deaths); text(ren, bx + 8, by + 36, UI_DIM, buf);
-        SDL_FRect b{bx + 8, by + bh - 34, bw - 16, 28};
-        g.btns.push_back({b, B_RESTART});
+        float bw = std::min(262.f, g.scrW - 8.f), bx = (g.scrW - bw) / 2;
+        size_t cols = (size_t)((bw - 16.f) / 8.f);
+        // the town's story: drop "first X" lines, then the oldest middle ones, until it fits
+        struct Entry { const LogLine* l; std::vector<std::string> lines; };
+        std::vector<Entry> es;
+        for (auto& l : w.history) { std::string d = "Day " + std::to_string(l.day); es.push_back({&l, wrap(d + std::string(6 - std::min<size_t>(5, d.size()), ' ') + l.text, cols)}); }
+        float fixedH = 8 + 12 + 12 + 12 + 8 + 34 + 8;   // title, stats, gap, buttons
+        float maxH = g.viewH - 8.f;
+        auto height = [&]() { float h = fixedH; for (auto& e : es) h += e.lines.size() * 10.f + 2.f; return h; };
+        for (int pass = 0; pass < 2 && height() > maxH; pass++)
+            for (size_t i = 1; i + 1 < es.size() && height() > maxH;)
+                if (pass == 1 || es[i].l->text.rfind("Built the first", 0) == 0) es.erase(es.begin() + i); else i++;
+        float bh = std::min(maxH, height()), by = g.viewY + (g.viewH - bh) / 2;
+        rect(ren, bx, by, bw, bh, UI_BG, 245);
+        rect(ren, bx, by, bw, 1, 0x5d4b62);
+        text(ren, bx + 8, by + 8, UI_BAD, g.daily ? "DAILY RUN OVER" : "YOUR TOWN FELL");
+        int best = g.daily ? g.bestDaily : g.best;
+        std::snprintf(buf, sizeof(buf), "Survived %d days  Best %d", w.day(), best); text(ren, bx + 8, by + 20, UI_TEXT, buf);
+        std::snprintf(buf, sizeof(buf), "Born %d  Died %d", w.births, w.deaths); text(ren, bx + 8, by + 32, UI_DIM, buf);
+        float ly = by + 50;
+        for (size_t i = 0; i < es.size(); i++) {
+            bool last = i + 1 == es.size(), bad = es[i].l->text.find(" took ") != std::string::npos;
+            uint32_t col = last ? UI_BAD : bad ? UI_WARN : (es[i].l->text.rfind("Built", 0) == 0 ? UI_DIM : 0xc7dcd0);
+            for (size_t k = 0; k < es[i].lines.size() && ly < by + bh - 44; k++, ly += 10) text(ren, bx + 8, ly, col, (k ? "      " : "") + es[i].lines[k]);
+            ly += 2;
+        }
+        float half = (bw - 16 - 6) / 2;
+        SDL_FRect b{bx + 8, by + bh - 34, half, 28}, d{bx + 14 + half, by + bh - 34, half, 28};
+        g.btns.push_back({b, B_RESTART}); g.btns.push_back({d, B_DAILY});
         button(ren, b, 0x1a7a4c, true, UI_GOOD); centered(ren, b, b.y + 10, UI_TEXT, "New world");
+        button(ren, d, UI_PANEL, true, UI_WARN); centered(ren, d, d.y + 10, UI_WARN, "Daily");
     }
 }
 
@@ -388,7 +463,8 @@ static void pressButton(Game& g, int id) {
     if (id == B_SPEED) g.cycleSpeed();
     else if (id == B_ZIN) g.stepZoomCenter(+1);
     else if (id == B_ZOUT) g.stepZoomCenter(-1);
-    else if (id == B_RESTART) g.restart(g.seed + 1);
+    else if (id == B_RESTART) g.restart(g.daily ? todaySeed() + 7919u * (uint32_t)SDL_GetTicks() : g.seed + 1);
+    else if (id == B_DAILY) g.restart(todaySeed(), true);
     else if (id >= B_TAB0 && id < B_TAB0 + 4) { g.tab = g.tab == id - B_TAB0 ? -1 : id - B_TAB0; if (g.tool != Tool::Place) g.cancelTool(); }
     else if (id == B_ROAD) { bool on = g.tool == Tool::Road; g.cancelTool(); g.selected = -1; if (!on) { g.tool = Tool::Road; g.tab = -1; } }
     else if (id == B_REMOVE) { bool on = g.tool == Tool::Remove; g.cancelTool(); g.selected = -1; if (!on) { g.tool = Tool::Remove; g.tab = -1; } }
@@ -509,7 +585,7 @@ static void relayout(SDL_Renderer* ren, Game& g) {
 
 int main(int argc, char** argv) {
     const char* shotPath = nullptr;
-    int shotDays = 0; bool demo = false; float shotZoom = 0.f;
+    int shotDays = 0; bool demo = false; float shotZoom = 0.f; bool daily = false;
     std::string shotUi = "well";
     int winW = 324, winH = 702;   // portrait phone shape on desktop
     uint32_t seed = (uint32_t)std::time(nullptr);
@@ -519,11 +595,12 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--size") && i + 1 < argc) std::sscanf(argv[++i], "%dx%d", &winW, &winH);
         else if (!std::strcmp(argv[i], "--seed") && i + 1 < argc) seed = (uint32_t)std::strtoul(argv[++i], nullptr, 10);
         else if (!std::strcmp(argv[i], "--demo")) demo = true;
+        else if (!std::strcmp(argv[i], "--daily")) daily = true;
         else if (!std::strcmp(argv[i], "--zoom") && i + 1 < argc) shotZoom = (float)std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--ui") && i + 1 < argc) shotUi = argv[++i];
         else if (!std::strcmp(argv[i], "--help")) {
             std::printf("villagesim [--seed N] [--size WxH]\n"
-                        "  --shot out.bmp [--days N] [--demo] [--ui none|well|road|info] [--zoom 0.5..4]  render one frame and exit\n"
+                        "  --shot out.bmp [--days N] [--demo] [--ui none|well|road|info|warn] [--daily] [--zoom 0.5..4]  render one frame and exit\n"
                         "  --demo  a scripted player builds the town during --days (for screenshots)\n");
             return 0;
         }
@@ -542,8 +619,8 @@ int main(int argc, char** argv) {
     SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
 
     Game g;
-    g.best = loadBest();
-    g.restart(seed);
+    g.best = loadBest(); g.bestDaily = loadBest(true);
+    g.restart(daily ? todaySeed() : seed, daily);
     relayout(ren, g);
     g.zoom = std::max(1.f, g.minZoom());
     if (shotZoom > 0.f) { g.zoom = shotZoom; g.zoom = g.ZL[g.zoomIndex()]; }
@@ -555,6 +632,8 @@ int main(int argc, char** argv) {
             for (int t = 0; t < TICKS_PER_DAY && !w.gameOver(); t++) w.tick();
         }
         for (int t = 0; t < TICKS_PER_DAY / 3 && !w.gameOver(); t++) w.tick();   // midday light
+        if (shotUi == "warn") { w.pending = Event::Raiders; w.pendingTicks = 50; w.pendingSide = -1; }
+        if (shotUi == "warn2") { w.pending = Event::Wildfire; w.pendingTicks = 60; w.pendingSide = 0; }
         if (shotUi == "well" || shotUi == "tower") {
             g.tab = 3;
             BType t = shotUi == "well" ? BType::Well : BType::Tower;
@@ -635,8 +714,13 @@ int main(int argc, char** argv) {
         if (acc > 0.5) acc = 0.5;
         while (acc >= 0.1) { acc -= 0.1; if (!g.paused) for (int s = 0; s < g.speed; s++) g.world->tick(); }
         if (g.world->gameOver() && !g.bestSaved) {
-            if (g.world->day() > g.best) { g.best = g.world->day(); saveBest(g.best); }
+            int& best = g.daily ? g.bestDaily : g.best;
+            if (g.world->day() > best) { best = g.world->day(); saveBest(best, g.daily); }
             g.bestSaved = true;
+        }
+        if (g.world->pending != g.warnedFor) {   // a new warning: slow down so there's time to react
+            if (g.world->pending != Event::None && g.speed > 1) g.speed = 1;
+            g.warnedFor = g.world->pending;
         }
         if (g.selected >= 0 && (g.selected >= (int)g.world->buildings.size() || !g.world->buildings[g.selected].alive)) g.selected = -1;
 

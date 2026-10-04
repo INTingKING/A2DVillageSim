@@ -87,7 +87,7 @@ inline void defender(World& w) {
     player(w);
     if (w.count(BType::Well) < 1 + w.population() / 12) build(w, BType::Well);
     if (w.population() > 8 && w.count(BType::Tower) < 1 + w.population() / 15) build(w, BType::Tower);
-    if (w.population() > 10 && w.count(BType::Healer) < 1) build(w, BType::Healer);
+    if (w.population() > 6 && w.count(BType::Healer) < 1 + w.population() / 30) build(w, BType::Healer);
 }
 
 inline int playRun(World& w, int days, void (*p)(World&)) {

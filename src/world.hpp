@@ -86,6 +86,7 @@ struct Raider {
 
 struct Arrow { float x0, y0, x1, y1; int born; };
 struct LogLine { int day; std::string text; };
+constexpr int WARN_TICKS = 80;   // a disaster is announced this long (8 s at 1x) before it hits
 
 class World {
 public:
@@ -117,6 +118,12 @@ public:
     int jobsOpen() const;
     float food() const { return store[(int)Res::Bread] + store[(int)Res::Fish]; }
     bool gameOver() const { return over; }
+    // Upcoming disaster (announced, not hit yet). pendingSide: -1 west, +1 east, 0 everywhere.
+    Event pending = Event::None; int pendingTicks = 0; int pendingSide = 0;
+    static const char* warnText(Event e, int side);
+    int dangerLevel() const;   // 0.. grows with the day count; more and bigger disasters
+    // Town story for the game-over screen: founding, firsts, growth, big losses, the end.
+    std::vector<LogLine> history;
 
     std::vector<Cell> cells;
     std::vector<Building> buildings;
@@ -144,7 +151,13 @@ private:
     void assignJobs();
     void dawn();
     void rollEvent();
+    void rollEventNow();
     void startEvent(Event e);
+    void note(const std::string& s) { history.push_back({day() + 1, s}); }
+    Event lastEvent = Event::None; int lastEventDay = -100;
+    int lostToday = 0, diedToday = 0, popMark = 0;
+    Event storyCause = Event::None; int storyDay = -100, storyIdx = -1, storyLost = 0, storyDied = 0;
+    bool built[(int)BType::Count] = {};
     void updateVillager(int vi);
     void updateBuilding(int bi);
     void updateRaiders();

@@ -5,7 +5,7 @@ You place buildings and roads; villagers staff them and run the production chain
 droughts, plagues, wildfires, raiders, locusts and blizzards at your town, more often the longer you survive.
 There are no god powers: wells, healers and watchtowers are your only protection. Your score is the number of days survived.
 
-<img src="docs/screenshot-phone.png" width="270" alt="Placing a well: coverage circle, covered houses light up"> <img src="docs/screenshot-chains.png" width="270" alt="Food tab and the mill selected">
+<img src="docs/screenshot-phone.png" width="270" alt="Placing a well: coverage circle, covered houses light up"> <img src="docs/screenshot-chains.png" width="270" alt="Food tab and the mill selected"> <img src="docs/screenshot-warning.png" width="270" alt="Raider warning with countdown and edge glow"> <img src="docs/screenshot-story.png" width="270" alt="Game over: the town's story">
 
 ## How it plays
 
@@ -17,6 +17,10 @@ There are no god powers: wells, healers and watchtowers are your only protection
 - **Winter** burns logs as firewood; cold houses show a firewood bubble.
 - **Safety:** a Well puts out fires and stops them spreading in its radius, a Healer cures plague, a Watchtower shoots raiders.
   While placing one you see its coverage circle and the houses it would cover light up.
+- **Warnings:** every disaster is announced 8 game seconds before it hits, with a countdown chip under the day counter, a glow on the edge raiders come from, and a tint for fire, plague or blizzard. A warning drops the speed back to x1.
+- **It gets harder:** disasters come more often and hit harder as the days pass, and after day 35 a second one can arrive in the afternoon. Every town falls eventually.
+- **The town's story:** when your town falls, the game-over screen tells its story day by day: founding, key buildings, growth, winters survived, the disasters that hit hardest, and the end.
+- **Daily run:** the Daily button (or `--daily`) starts today's world, the same for everyone on the same date, with its own best score.
 - Roof colours follow the drawer tabs: red-brown homes, straw food, green-brown wood, slate safety.
 
 ## Controls
