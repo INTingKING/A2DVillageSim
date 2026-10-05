@@ -18,6 +18,8 @@ constexpr int DAYS_PER_SEASON = 6;
 
 enum class Tile : uint8_t { Deep, Water, Sand, Grass, Forest, Mountain, Ash, Road, Building };
 enum class Season : uint8_t { Spring, Summer, Autumn, Winter };
+// Town ages (Empire Earth style): the look of buildings and people advances with what you build.
+enum class Age : uint8_t { Camp, Village, Craft, Fortified, Count };
 enum class Event : uint8_t { None, Drought, Plague, Wildfire, Raiders, Locusts, Blizzard };
 enum class Res : uint8_t { Logs, Planks, Wheat, Flour, Bread, Fish, Count };
 
@@ -38,6 +40,7 @@ struct BInfo {
 const BInfo& binfo(BType t);
 const char* resName(Res r);
 const char* seasonName(Season s);
+const char* ageName(Age a);
 const char* categoryName(Category c);
 
 struct Cell {
@@ -110,6 +113,7 @@ public:
     int day() const { return ticks / TICKS_PER_DAY; }
     float dayFrac() const { return (ticks % TICKS_PER_DAY) / (float)TICKS_PER_DAY; }
     Season season() const { return (Season)((day() / DAYS_PER_SEASON) % 4); }
+    Age age() const;   // Camp -> Village -> Craft -> Fortified
     int population() const;
     int housing() const;
     int sickCount() const;
@@ -158,6 +162,7 @@ private:
     int lostToday = 0, diedToday = 0, popMark = 0;
     Event storyCause = Event::None; int storyDay = -100, storyIdx = -1, storyLost = 0, storyDied = 0;
     bool built[(int)BType::Count] = {};
+    Age ageAnnounced = Age::Camp;
     void updateVillager(int vi);
     void updateBuilding(int bi);
     void updateRaiders();

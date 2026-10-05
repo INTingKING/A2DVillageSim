@@ -176,11 +176,16 @@ void roadTile(Canvas& cv, const World& w, int ox, int oy, int tx, int ty, bool w
             if (!on(x, y)) continue;
             uint32_t h = hashc(ox + x, oy + y, 11) & 31;
             uint32_t c = h < 3 ? ROAD_D : (h < 6 ? ROAD_L : ROAD);
-            // darker rim where the dirt meets grass (bottom/right shade)
+            // Fortified age: packed dirt becomes cobblestone
+            if (w.age() == Age::Fortified) {
+                c = ((x / 4 + y / 4) & 1) ? ROCK_L : ROCK;
+                if (h < 4) c = ROCK_LL;
+                if (((x + y) % 5) == 0) c = ROCK_D;
+            }
             bool rimB = !on(x, y + 1) && y + 1 < T, rimR = !on(x + 1, y) && x + 1 < T;
             bool rimT = y > 0 && !on(x, y - 1), rimL = x > 0 && !on(x - 1, y);
-            if (rimB || rimR) c = ROAD_D;
-            else if (rimT || rimL) c = ROAD_L;
+            if (rimB || rimR) c = darken(c, 0.25f);
+            else if (rimT || rimL) c = lighten(c, 0.15f);
             cv.put(ox + x, oy + y, snowy(c, winter, 0.35f));
         }
 }
@@ -286,36 +291,80 @@ void door(Canvas& cv, int x, int y, int h) {
     cv.rect(x - 1, y + h, 7, 1, ROCK_L);   // step
 }
 
-// Timber cottage in the box (x,y,w,h): shingled roof of height roofH over a framed wall.
-void cottage(Canvas& cv, int x, int y, int w, int h, uint32_t roof, bool night, bool winter, int roofH, uint32_t wall = WALL) {
+// Timber cottage. Age shifts the materials the way Empire Earth epochs restyle buildings:
+// Camp = thatch + raw timber, Village = shingles + plaster, Craft = tiles + whitewash,
+// Fortified = slate + stone skirt.
+void cottage(Canvas& cv, int x, int y, int w, int h, uint32_t roof, bool night, bool winter, int roofH, uint32_t wall, Age age) {
     int wy = y + roofH;
     cv.shadow(x + w / 2 + 3, y + h, w / 2 + 1, 3, 0.3f);
     cv.blendRect(x + w, wy + 2, 3, h - roofH - 1, 0x0b1a1a, 0.3f);
-    // walls
-    cv.rect(x + 1, wy, w - 2, h - roofH, wall);
-    cv.rect(x + w - 4, wy, 3, h - roofH, darken(wall, 0.15f));
-    for (int j = wy; j < y + h; j++) { cv.put(x + 1, j, BEAM); cv.put(x + w - 2, j, BEAM); }
-    for (int i = x + 1; i < x + w - 1; i++) { cv.put(i, wy, BEAM); cv.put(i, y + h - 1, darken(wall, 0.3f)); }
+    // walls by age
+    uint32_t wallCol = wall, beam = BEAM;
+    if (age == Age::Camp) { wallCol = darken(WOOD, 0.05f); beam = WOOD_D; }
+    else if (age == Age::Craft) wallCol = lighten(wall, 0.12f);
+    else if (age == Age::Fortified) wallCol = lighten(wall, 0.18f);
+    cv.rect(x + 1, wy, w - 2, h - roofH, wallCol);
+    cv.rect(x + w - 4, wy, 3, h - roofH, darken(wallCol, 0.15f));
+    // Fortified: stone skirt along the bottom third of the wall
+    if (age == Age::Fortified) {
+        int skirt = wy + (h - roofH) * 2 / 3;
+        for (int j = skirt; j < y + h; j++)
+            for (int i = x + 1; i < x + w - 1; i++) {
+                uint32_t c = ((i + j / 3) & 1) ? ROCK_L : ROCK;
+                if ((j - skirt) % 3 == 0) c = darken(c, 0.15f);
+                cv.put(i, j, c);
+            }
+    }
+    // Camp: vertical log posts instead of plaster beams
+    if (age == Age::Camp) {
+        for (int i = x + 3; i < x + w - 3; i += 3)
+            for (int j = wy; j < y + h; j++) cv.put(i, j, ((j + i) & 1) ? WOOD : WOOD_D);
+    }
+    for (int j = wy; j < y + h; j++) { cv.put(x + 1, j, beam); cv.put(x + w - 2, j, beam); }
+    for (int i = x + 1; i < x + w - 1; i++) { cv.put(i, wy, beam); cv.put(i, y + h - 1, darken(wallCol, 0.3f)); }
     cv.line(x + 1, y + h - 1, x + 1, wy, OUTLINE); cv.line(x + w - 1, y + h - 1, x + w - 1, wy, OUTLINE);
     cv.line(x + 1, y + h, x + w - 1, y + h, OUTLINE);
-    // roof: a trapezoid that overhangs the wall by 1px, rows of shingles
+    // roof: thatch (Camp), shingles (Village), tiles (Craft), slate (Fortified)
     for (int r = 0; r < roofH; r++) {
         int inset = (roofH - 1 - r) * (w / 3) / std::max(1, roofH - 1);
         int x0 = x + inset - (r == roofH - 1 ? 1 : 0), x1 = x + w - 1 - inset + (r == roofH - 1 ? 1 : 0);
         for (int i = x0; i <= x1; i++) {
             uint32_t c = roof;
-            bool shingleLine = (roofH - 1 - r) % 3 == 0;
-            bool tick = ((i + (r / 3) * 2) % 4) == 0 && !shingleLine;
-            if (shingleLine) c = darken(roof, 0.2f);
-            else if (tick) c = darken(roof, 0.12f);
-            if (i - x0 < 2) c = lighten(roof, 0.25f);
-            if (x1 - i < 2) c = darken(roof, 0.3f);
-            if (r == 0) c = lighten(roof, 0.35f);
+            if (age == Age::Camp) {
+                // straw thatch: warm yellow, uneven
+                c = ((i + r * 3) % 5 == 0) ? 0xd4a84b : ((i + r) % 3 == 0 ? 0xe0a83a : 0xf0c060);
+                if ((roofH - 1 - r) % 2 == 0) c = darken(c, 0.12f);
+            } else if (age == Age::Craft) {
+                // clay tiles: horizontal bands
+                bool band = (roofH - 1 - r) % 2 == 0;
+                c = band ? darken(roof, 0.18f) : roof;
+                if ((i % 3) == 0) c = darken(c, 0.1f);
+            } else if (age == Age::Fortified) {
+                // slate: cool grey-blue, tight rows
+                c = ((roofH - 1 - r) % 2 == 0) ? 0x5a6e9c : 0x4a5a7a;
+                if ((i + r) % 4 == 0) c = darken(c, 0.15f);
+                // keep a hint of the category tint on the ridge
+                if (r < 2) c = mixc(c, roof, 0.35f);
+            } else {
+                bool shingleLine = (roofH - 1 - r) % 3 == 0;
+                bool tick = ((i + (r / 3) * 2) % 4) == 0 && !shingleLine;
+                if (shingleLine) c = darken(roof, 0.2f);
+                else if (tick) c = darken(roof, 0.12f);
+            }
+            if (i - x0 < 2) c = lighten(c, 0.2f);
+            if (x1 - i < 2) c = darken(c, 0.25f);
+            if (r == 0) c = lighten(c, 0.3f);
             if (winter && r < roofH * 2 / 3 && i > x0 && i < x1) c = ((i + r) % 5) ? SNOW : ROCK_LL;
             if (i == x0 || i == x1) c = OUTLINE;
             cv.put(i, y + r, c);
         }
         if (r == 0) for (int i = x0; i <= x1; i++) cv.put(i, y - 1, OUTLINE);
+    }
+    // Fortified: small banner on the roof ridge for civic buildings
+    if (age == Age::Fortified && w > 20) {
+        int bx = x + w / 2;
+        cv.line(bx, y - 1, bx, y - 6, OUTLINE);
+        cv.rect(bx + 1, y - 6, 5, 3, roof);
     }
     (void)night;
 }
@@ -388,12 +437,14 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
     const BInfo& in = binfo(b.type);
     int x = b.x * T, y = b.y * T, W = in.w * T, H = in.h * T;
     uint32_t roof = roofOf(b.type);
+    Age age = w.age();
     switch (b.type) {
     case BType::Hall: {
-        cottage(cv, x + 2, y + 12, W - 5, H - 14, roof, night, winter, 16, 0xf0e2c8);
-        // central bell tower
+        cottage(cv, x + 2, y + 12, W - 5, H - 14, roof, night, winter, 16, age == Age::Camp ? WOOD_L : 0xf0e2c8, age);
+        // central bell tower (timber post in Camp, stone later)
         int tx = x + W / 2 - 5;
-        cv.rect(tx, y + 2, 10, 14, ROCK_L); cv.rect(tx + 7, y + 2, 3, 14, ROCK);
+        if (age == Age::Camp) { cv.rect(tx + 2, y + 2, 6, 14, WOOD); cv.rect(tx + 6, y + 2, 2, 14, WOOD_D); }
+        else { cv.rect(tx, y + 2, 10, 14, ROCK_L); cv.rect(tx + 7, y + 2, 3, 14, ROCK); }
         cv.outlineRect(tx - 1, y + 1, 12, 16, OUTLINE);
         cv.rect(tx + 3, y + 5, 4, 5, OUTLINE); cv.rect(tx + 4, y + 7, 2, 2, RIPE);   // bell
         for (int i = 0; i < 12; i += 3) cv.rect(tx - 1 + i, y - 1, 2, 2, ROCK_L);
@@ -415,7 +466,7 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         break;
     }
     case BType::House: {
-        cottage(cv, x + 2, y + 4, W - 4, H - 6, roof, night, winter, 13);
+        cottage(cv, x + 2, y + 4, W - 4, H - 6, roof, night, winter, 13, WALL, age);
         cv.rect(x + W - 11, y + 1, 4, 7, 0x8a4836); cv.outlineRect(x + W - 12, y, 6, 8, OUTLINE);
         if (!b.cold) smoke(cv, x + W - 9, y - 2, frame, seed);
         window(cv, x + 6, y + 19, night);
@@ -423,7 +474,7 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         break;
     }
     case BType::Lumber: {
-        cottage(cv, x + 1, y + 3, 20, H - 6, roof, night, winter, 11);
+        cottage(cv, x + 1, y + 3, 20, H - 6, roof, night, winter, 11, WALL, age);
         door(cv, x + 8, y + H - 10, 7);
         logPile(cv, x + 20, y + H - 1, pileLevel(w, Res::Logs, 1 + w.count(BType::Lumber), 3.f, 6));
         // stump with axe
@@ -432,7 +483,7 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         break;
     }
     case BType::Sawmill: {
-        cottage(cv, x + 1, y + 6, W - 2, H - 8, roof, night, winter, 9);
+        cottage(cv, x + 1, y + 6, W - 2, H - 8, roof, night, winter, 9, WALL, age);
         door(cv, x + 5, y + H - 10, 7);
         // big saw blade with turning teeth
         int cx = x + W - 9, cy = y + 7;
@@ -448,7 +499,7 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         break;
     }
     case BType::Fisher: {
-        cottage(cv, x + 1, y + 4, 21, H - 6, roof, night, winter, 11);
+        cottage(cv, x + 1, y + 4, 21, H - 6, roof, night, winter, 11, WALL, age);
         door(cv, x + 8, y + H - 10, 7);
         // drying rack with fish
         cv.line(x + 24, y + 6, x + 24, y + H - 3, WOOD_D); cv.line(x + 30, y + 6, x + 30, y + H - 3, WOOD_D);
@@ -485,7 +536,7 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         for (int j = y; j < y + H; j++) { cv.put(x, j, WOOD_L); cv.put(x + W - 1, j, WOOD); }
         for (int i = x; i < x + W; i += 6) { cv.rect(i, y - 1, 1, 3, WOOD_D); cv.rect(i, y + H - 2, 1, 3, WOOD_D); }
         // barn in the corner
-        cottage(cv, x + W - 17, y + H - 18, 15, 15, roof, night, winter, 7, 0xc75b39);
+        cottage(cv, x + W - 17, y + H - 18, 15, 15, roof, night, winter, 7, 0xc75b39, age);
         cv.rect(x + W - 12, y + H - 9, 5, 6, DOOR); cv.line(x + W - 12, y + H - 9, x + W - 8, y + H - 4, WOOD_L);
         sacks(cv, x + W - 33, y + H - 2, pileLevel(w, Res::Wheat, w.count(BType::Farm), 4.f, 6), true);   // harvested sheaves
         // scarecrow
@@ -528,7 +579,7 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         break;
     }
     case BType::Bakery: {
-        cottage(cv, x + 1, y + 6, W - 2, H - 8, roof, night, winter, 11);
+        cottage(cv, x + 1, y + 6, W - 2, H - 8, roof, night, winter, 11, WALL, age);
         // brick chimney + smoke when baking
         cv.rect(x + 5, y, 5, 9, 0x8a4836);
         for (int j = 0; j < 9; j += 2) cv.rect(x + 5 + (j / 2 % 2) * 2, y + j, 1, 1, 0x6e2727);
@@ -564,7 +615,7 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         break;
     }
     case BType::Healer: {
-        cottage(cv, x + 1, y + 6, W - 2, H - 8, roof, night, winter, 11, 0xfdf7ed);
+        cottage(cv, x + 1, y + 6, W - 2, H - 8, roof, night, winter, 11, 0xfdf7ed, age);
         // green cross banner
         cv.rect(x + W / 2 - 4, y - 2, 8, 10, 0xfdf7ed); cv.outlineRect(x + W / 2 - 5, y - 3, 10, 12, OUTLINE);
         cv.rect(x + W / 2 - 1, y - 1, 2, 8, 0x1ebc73); cv.rect(x + W / 2 - 3, y + 2, 6, 2, 0x1ebc73);
@@ -749,13 +800,37 @@ void drawWorld(const World& w, uint32_t* px, int pitchPx, int frame, const Overl
         bool flip = false;
         if (moving) { int ni = v.path[v.pathPos]; flip = (ni % MAP_W) < v.x - 0.01f; }
         uint32_t hair = v.age > 50.f ? 0xdcd6e0 : HAIR[hashc(i, 3) % 5];
-        uint32_t shirt = v.sick ? SICK : (v.work >= 0 ? roofOf(w.buildings[v.work].type) : (v.age < 6.f ? 0xf5a097 : 0x4d9be6));
+        // clothes follow the town age: muted camp tunics -> dyed village shirts -> craft dyes -> fortified cloaks
+        uint32_t shirt;
+        if (v.sick) shirt = SICK;
+        else if (v.work >= 0) shirt = roofOf(w.buildings[v.work].type);
+        else if (v.age < 6.f) shirt = 0xf5a097;
+        else {
+            Age ag = w.age();
+            static const uint32_t CAMP_C[3] = {0x80553e, 0x694f62, 0x7a4a2a};
+            static const uint32_t VILL_C[3] = {0x4d9be6, 0x1ebc73, 0xb33831};
+            static const uint32_t CRAFT_C[3] = {0x5a6e9c, 0xe0a83a, 0x6b3e75};
+            static const uint32_t FORT_C[3] = {0x3e3546, 0x5a6e9c, 0xb33831};
+            const uint32_t* pal = ag == Age::Camp ? CAMP_C : (ag == Age::Craft ? CRAFT_C : (ag == Age::Fortified ? FORT_C : VILL_C));
+            shirt = pal[hashc(i, 7) % 3];
+        }
         uint32_t skin = v.sick ? mixc(SKIN, SICK, 0.5f) : (hashc(i, 9) % 3 == 0 ? SKIN_D : SKIN);
         int fx = (int)std::lround(v.x * T) + 8, fy = (int)std::lround(v.y * T) + 14;
         if (fx < cv.cx0 - 10 || fx > cv.cx1 + 10 || fy < cv.cy0 - 16 || fy > cv.cy1 + 16) continue;
         cv.shadow(fx, fy, 3, 1, 0.3f);
         if (v.age < 6.f) sprite(cv, fx - 2, fy - 8, KID[f], 8, hair, shirt, skin, flip);
-        else sprite(cv, fx - 3, fy - 12, ADULT[f], 12, hair, shirt, skin, flip);
+        else {
+            sprite(cv, fx - 3, fy - 12, ADULT[f], 12, hair, shirt, skin, flip);
+            // elders get a cloak drape in Craft+; Fortified adults wear a hat
+            if (v.age > 50.f && (int)w.age() >= (int)Age::Craft) {
+                cv.rect(fx - 4, fy - 8, 8, 3, darken(shirt, 0.25f));
+                cv.put(fx - 4, fy - 7, OUTLINE); cv.put(fx + 3, fy - 7, OUTLINE);
+            }
+            if ((int)w.age() >= (int)Age::Fortified && v.age >= 16.f && !v.sick) {
+                cv.rect(fx - 3, fy - 14, 6, 2, darken(shirt, 0.35f));
+                cv.rect(fx - 2, fy - 15, 4, 1, OUTLINE);
+            }
+        }
         if (v.carrying && v.work >= 0) {   // carried good above the head
             bool logs = w.buildings[v.work].type == BType::Lumber;
             int cxp = fx - 2, cyp = fy - (v.age < 6.f ? 12 : 16);

@@ -58,6 +58,17 @@ const char* seasonName(Season s) {
     static const char* n[] = {"Spring", "Summer", "Autumn", "Winter"};
     return n[(int)s];
 }
+const char* ageName(Age a) {
+    static const char* n[] = {"Camp", "Village", "Craft", "Fortified"};
+    return n[(int)a];
+}
+Age World::age() const {
+    if (count(BType::Tower) > 0 || count(BType::Healer) > 0) return Age::Fortified;
+    if (count(BType::Mill) > 0 || count(BType::Sawmill) > 0 || count(BType::Bakery) > 0) return Age::Craft;
+    if (count(BType::House) > 0 || count(BType::Farm) > 0 || count(BType::Lumber) > 0) return Age::Village;
+    return Age::Camp;
+}
+
 const char* categoryName(Category c) {
     static const char* n[] = {"Homes", "Food", "Wood", "Safety"};
     return n[(int)c];
@@ -792,6 +803,13 @@ void World::dawn() {
 
 void World::tick() {
     if (over) return;
+    // age can jump mid-day when you place a mill or tower
+    Age a = age();
+    if ((int)a > (int)ageAnnounced) {
+        ageAnnounced = a;
+        note(std::string("Entered the ") + ageName(a) + " Age.");
+        say(std::string("The town enters the ") + ageName(a) + " Age.");
+    }
     if (ticks % TICKS_PER_DAY == 0) dawn();
     // late game: a second disaster can be announced in the afternoon
     if (disastersOn && ticks % TICKS_PER_DAY == TICKS_PER_DAY / 2 && pending == Event::None && day() > 35 &&

@@ -267,8 +267,13 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
         rect(ren, 0, topStart, (float)g.scrW, topH, UI_BG, 235);
         rect(ren, 0, topH - 1, (float)g.scrW, 1, 0x1d161f);
         text(ren, pad, y + 1, UI_TEXT, dayS, 2.f);
-        text(ren, pad + 16.f * dayS.size() + 6.f, y + 5, UI_DIM, seasonName(w.season()));
-        if (g.daily) text(ren, pad + 16.f * dayS.size() + 6.f + 8.f * (std::strlen(seasonName(w.season())) + 1), y + 5, UI_WARN, "DAILY");
+        // season then age name (Empire Earth style epoch label)
+        float sx = pad + 16.f * dayS.size() + 6.f;
+        text(ren, sx, y + 5, UI_DIM, seasonName(w.season()));
+        sx += 8.f * (std::strlen(seasonName(w.season())) + 1);
+        text(ren, sx, y + 5, UI_GOOD, ageName(w.age()));
+        sx += 8.f * (std::strlen(ageName(w.age())) + 1);
+        if (g.daily) text(ren, sx, y + 5, UI_WARN, "DAILY");
         float cw = (g.scrW - 2 * pad) / 4.f, sy = y + 23.f;
         for (size_t i = 0; i < stats.size(); i++) {
             float sx = pad + i * cw;
