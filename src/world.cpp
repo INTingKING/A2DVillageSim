@@ -62,11 +62,40 @@ const char* ageName(Age a) {
     static const char* n[] = {"Camp", "Village", "Craft", "Fortified"};
     return n[(int)a];
 }
-Age World::age() const {
-    if (count(BType::Tower) > 0 || count(BType::Healer) > 0) return Age::Fortified;
-    if (count(BType::Mill) > 0 || count(BType::Sawmill) > 0 || count(BType::Bakery) > 0) return Age::Craft;
-    if (count(BType::House) > 0 || count(BType::Farm) > 0 || count(BType::Lumber) > 0) return Age::Village;
-    return Age::Camp;
+Age World::nextAge() const {
+    if (currentAge == Age::Fortified) return Age::Fortified;
+    return (Age)((int)currentAge + 1);
+}
+void World::advanceCost(int& logs, int& planks, int& bread) const {
+    logs = planks = bread = 0;
+    switch (nextAge()) {
+    case Age::Village:   logs = 15; planks = 10; break;
+    case Age::Craft:     logs = 25; planks = 20; bread = 10; break;
+    case Age::Fortified: logs = 40; planks = 30; bread = 20; break;
+    default: break;
+    }
+}
+bool World::canAdvance() const {
+    if (currentAge == Age::Fortified) return false;
+    int logs, planks, bread; advanceCost(logs, planks, bread);
+    if (store[(int)Res::Logs] < logs || store[(int)Res::Planks] < planks || store[(int)Res::Bread] < bread) return false;
+    // EE2-style: you unlock the next age by having built into it, then paying to adopt the look
+    switch (nextAge()) {
+    case Age::Village:   return count(BType::House) + count(BType::Lumber) + count(BType::Farm) >= 1;
+    case Age::Craft:     return count(BType::Mill) + count(BType::Sawmill) + count(BType::Bakery) >= 1;
+    case Age::Fortified: return count(BType::Tower) + count(BType::Healer) + count(BType::Well) >= 1;
+    default: return false;
+    }
+}
+bool World::tryAdvance() {
+    if (!canAdvance()) return false;
+    int logs, planks, bread; advanceCost(logs, planks, bread);
+    store[(int)Res::Logs] -= logs; store[(int)Res::Planks] -= planks; store[(int)Res::Bread] -= bread;
+    currentAge = nextAge();
+    ageCeremony = 24;   // ~2.4 s at 1x: buildings flash their new shapes
+    note(std::string("Entered the ") + ageName(currentAge) + " Age.");
+    say(std::string("The town enters the ") + ageName(currentAge) + " Age!");
+    return true;
 }
 
 const char* categoryName(Category c) {
@@ -803,13 +832,7 @@ void World::dawn() {
 
 void World::tick() {
     if (over) return;
-    // age can jump mid-day when you place a mill or tower
-    Age a = age();
-    if ((int)a > (int)ageAnnounced) {
-        ageAnnounced = a;
-        note(std::string("Entered the ") + ageName(a) + " Age.");
-        say(std::string("The town enters the ") + ageName(a) + " Age.");
-    }
+    if (ageCeremony > 0) --ageCeremony;
     if (ticks % TICKS_PER_DAY == 0) dawn();
     // late game: a second disaster can be announced in the afternoon
     if (disastersOn && ticks % TICKS_PER_DAY == TICKS_PER_DAY / 2 && pending == Event::None && day() > 35 &&

@@ -73,6 +73,7 @@ inline bool build(World& w, BType t) {
 // A simple build order, re-run each day.
 inline void player(World& w) {
     auto has = [&](BType t) { return w.count(t); };
+    while (w.canAdvance()) { w.ageCeremony = 0; w.tryAdvance(); }   // demo buys ages; skip flash wait
     for (int i = 0; i < (int)w.buildings.size(); i++) if (w.buildings[i].alive && !w.buildings[i].connected) connect(w, i);
     if (has(BType::Lumber) < 1) build(w, BType::Lumber);
     if (has(BType::Fisher) < 1 + w.population() / 8) build(w, BType::Fisher);

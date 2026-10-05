@@ -113,7 +113,12 @@ public:
     int day() const { return ticks / TICKS_PER_DAY; }
     float dayFrac() const { return (ticks % TICKS_PER_DAY) / (float)TICKS_PER_DAY; }
     Season season() const { return (Season)((day() / DAYS_PER_SEASON) % 4); }
-    Age age() const;   // Camp -> Village -> Craft -> Fortified
+    Age age() const { return currentAge; }   // only advances when the player buys it
+    Age nextAge() const;
+    bool canAdvance() const;                  // prereqs + stock
+    void advanceCost(int& logs, int& planks, int& bread) const;
+    bool tryAdvance();                        // pay, restyle, start ceremony
+    int ageCeremony = 0;                      // ticks left of the advance flash
     int population() const;
     int housing() const;
     int sickCount() const;
@@ -162,7 +167,7 @@ private:
     int lostToday = 0, diedToday = 0, popMark = 0;
     Event storyCause = Event::None; int storyDay = -100, storyIdx = -1, storyLost = 0, storyDied = 0;
     bool built[(int)BType::Count] = {};
-    Age ageAnnounced = Age::Camp;
+    Age currentAge = Age::Camp;
     void updateVillager(int vi);
     void updateBuilding(int bi);
     void updateRaiders();

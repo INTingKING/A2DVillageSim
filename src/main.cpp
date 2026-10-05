@@ -54,7 +54,7 @@ constexpr uint32_t UI_BG = 0x2e222f, UI_PANEL = 0x3e3546, UI_SEL = 0x6b3e75, UI_
 static const uint32_t TAB_COL[4] = {0xb33831, 0xe0a83a, 0x5b6b2e, 0x5a6e9c};   // roof colours per category
 
 enum class Tool { None, Place, Road, Remove };
-enum BtnId { B_TAB0 = 0, B_ROAD = 10, B_REMOVE, B_CARD0 = 20, B_OK = 40, B_CANCEL, B_SPEED, B_RESTART, B_ZIN, B_ZOUT, B_DAILY, B_PLAY, B_BLOCK };
+enum BtnId { B_TAB0 = 0, B_ROAD = 10, B_REMOVE, B_CARD0 = 20, B_OK = 40, B_CANCEL, B_SPEED, B_RESTART, B_ZIN, B_ZOUT, B_DAILY, B_PLAY, B_BLOCK, B_ADVANCE };
 struct Btn { SDL_FRect r; int id; };
 
 static const char* shortName(BType t) {
@@ -396,6 +396,8 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
             if (!b.connected && b.type != BType::Hall) { status += ": no road"; scol = UI_BAD; }
             else if (in.workers) status += " " + std::to_string(b.staffed) + "/" + std::to_string(in.workers) + " workers";
             else if (b.type == BType::House) status += b.hungry ? ": hungry" : (b.cold ? ": cold" : ": 4 beds");
+            else if (b.type == BType::Hall && w.age() != Age::Fortified)
+                status = std::string("Advance to ") + ageName(w.nextAge());
             showOk = false;
         }
         if (draw) text(ren, pad, confY + 10, scol, status);
@@ -407,6 +409,26 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
                 else { text(ren, sx, sy + 1, UI_DIM, st.label); sx += 8.f * std::strlen(st.label) + 4; }
                 text(ren, sx, sy + 1, UI_TEXT, n); sx += 8.f * n.size() + 12;
             }
+        }
+        // EE2-style: Advance on the town hall, cost shown as the piles you already know
+        bool hallSel = g.tool == Tool::None && g.selected >= 0 && w.buildings[g.selected].type == BType::Hall && w.age() != Age::Fortified;
+        if (hallSel) {
+            int logs = 0, planks = 0, bread = 0; w.advanceCost(logs, planks, bread);
+            SDL_FRect adv{g.scrW - pad - 72.f, confY, 72.f, btnH};
+            g.btns.push_back({adv, B_ADVANCE});
+            bool can = w.canAdvance();
+            if (draw) {
+                
+                button(ren, adv, can ? 0x1a7a4c : 0x5a2a35, true, can ? UI_GOOD : UI_BAD);
+                if (can) rect(ren, adv.x + 2, adv.y + 2, adv.w - 4, 2, UI_WARN);
+                centered(ren, adv, adv.y + 6, UI_TEXT, "Advance");
+                // cost under the label as icons
+                float cx = adv.x + 4, cy = adv.y + 16;
+                if (logs) { statIcon(ren, cx, cy, 2); text(ren, cx + 10, cy, can || w.store[(int)Res::Logs] >= logs ? UI_TEXT : UI_BAD, std::to_string(logs)); cx += 22; }
+                if (planks) { statIcon(ren, cx, cy, 3); text(ren, cx + 10, cy, w.store[(int)Res::Planks] >= planks ? UI_TEXT : UI_BAD, std::to_string(planks)); cx += 22; }
+                if (bread) { text(ren, cx, cy, w.store[(int)Res::Bread] >= bread ? UI_TEXT : UI_BAD, std::to_string(bread) + "b"); }
+            }
+            showOk = false;
         }
         if (g.tool != Tool::None || g.selected >= 0) {
             g.btns.push_back({no, B_CANCEL});
@@ -587,6 +609,7 @@ static void pressButton(Game& g, int id) {
     else if (id == B_REMOVE) { bool on = g.tool == Tool::Remove; g.cancelTool(); g.selected = -1; if (!on) { g.tool = Tool::Remove; g.tab = -1; } }
     else if (id >= B_CARD0 && id < B_CARD0 + (int)BType::Count) { g.fresh[id - B_CARD0] = false; g.startPlace((BType)(id - B_CARD0)); }
     else if (id == B_CANCEL) { g.cancelTool(); g.selected = -1; }
+    else if (id == B_ADVANCE) { if (!w.tryAdvance()) g.say("Need goods or buildings first"); }
     else if (id == B_OK) {
         if (g.tool == Tool::Place) g.confirmPlace();
         else if (g.tool == Tool::Road) { if (!g.roadDrag.empty()) g.commitRoad(); g.cancelTool(); }
@@ -767,6 +790,8 @@ int main(int argc, char** argv) {
             g.tool = Tool::Road;
             for (int i = 0; i < 8; i++) g.addRoadTile(w.hallX + 4 + i, w.hallY + 8);
         } else if (shotUi == "hall") {
+            for (int i = 0; i < (int)w.buildings.size(); i++) if (w.buildings[i].alive && w.buildings[i].type == BType::Hall) g.selected = i;
+        } else if (shotUi == "advance") {
             for (int i = 0; i < (int)w.buildings.size(); i++) if (w.buildings[i].alive && w.buildings[i].type == BType::Hall) g.selected = i;
         } else if (shotUi == "info") {
             g.tab = 1;

@@ -440,21 +440,101 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
     Age age = w.age();
     switch (b.type) {
     case BType::Hall: {
-        cottage(cv, x + 2, y + 12, W - 5, H - 14, roof, night, winter, 16, age == Age::Camp ? WOOD_L : 0xf0e2c8, age);
-        // central bell tower (timber post in Camp, stone later)
-        int tx = x + W / 2 - 5;
-        if (age == Age::Camp) { cv.rect(tx + 2, y + 2, 6, 14, WOOD); cv.rect(tx + 6, y + 2, 2, 14, WOOD_D); }
-        else { cv.rect(tx, y + 2, 10, 14, ROCK_L); cv.rect(tx + 7, y + 2, 3, 14, ROCK); }
-        cv.outlineRect(tx - 1, y + 1, 12, 16, OUTLINE);
-        cv.rect(tx + 3, y + 5, 4, 5, OUTLINE); cv.rect(tx + 4, y + 7, 2, 2, RIPE);   // bell
-        for (int i = 0; i < 12; i += 3) cv.rect(tx - 1 + i, y - 1, 2, 2, ROCK_L);
-        cv.line(tx + 5, y - 1, tx + 5, y - 9, OUTLINE);
-        int wave = (frame / 8) % 2;
-        cv.rect(tx + 6, y - 9, 6, 3, 0xf9c22b); cv.rect(tx + 6 + 2 * wave, y - 7, 4, 1, 0xfbb954);
-        window(cv, x + 7, y + 32, night); window(cv, x + W - 13, y + 32, night);
-        door(cv, x + W / 2 - 3, y + H - 10, 8);
-        // the town's store, in fixed steps you can learn: 1 log per 10, 1 board per 10, 1 food per 20.
-        // A pile at its cap sparkles: there is more than it can show.
+        // Silhouette changes with the age you bought (EE2-style), not only materials.
+        if (age == Age::Camp) {
+            // A-frame longhouse: steep thatch almost to the ground, open timber, no bell tower
+            int base = y + H - 2;
+            for (int r = 0; r < 22; r++) {
+                int half = 2 + r * (W / 2 - 4) / 21;
+                int yy = base - 22 + r;
+                for (int i = -half; i <= half; i++) {
+                    uint32_t c = ((i + r) % 5 == 0) ? 0xd4a84b : ((i + r) % 3 ? 0xe0a83a : 0xf0c060);
+                    if (i == -half || i == half) c = OUTLINE;
+                    if (r > 16 && std::abs(i) < half - 2) c = WOOD;   // low open timber under the eaves
+                    cv.put(x + W / 2 + i, yy, c);
+                }
+            }
+            // ridge pole + cloth flag
+            cv.line(x + W / 2, base - 24, x + W / 2, base - 30, WOOD_D);
+            cv.rect(x + W / 2 + 1, base - 30, 5, 3, 0xc09473);
+            door(cv, x + W / 2 - 3, base - 9, 7);
+            // smoke hole
+            if (!winter) smoke(cv, x + W / 2 + 4, base - 20, frame, seed);
+        } else if (age == Age::Village) {
+            cottage(cv, x + 2, y + 12, W - 5, H - 14, roof, night, winter, 16, 0xf0e2c8, age);
+            int tx = x + W / 2 - 5;
+            cv.rect(tx, y + 2, 10, 14, ROCK_L); cv.rect(tx + 7, y + 2, 3, 14, ROCK);
+            cv.outlineRect(tx - 1, y + 1, 12, 16, OUTLINE);
+            cv.rect(tx + 3, y + 5, 4, 5, OUTLINE); cv.rect(tx + 4, y + 7, 2, 2, RIPE);
+            for (int i = 0; i < 12; i += 3) cv.rect(tx - 1 + i, y - 1, 2, 2, ROCK_L);
+            cv.line(tx + 5, y - 1, tx + 5, y - 9, OUTLINE);
+            int wave = (frame / 8) % 2;
+            cv.rect(tx + 6, y - 9, 6, 3, 0xf9c22b); cv.rect(tx + 6 + 2 * wave, y - 7, 4, 1, 0xfbb954);
+            window(cv, x + 7, y + 32, night); window(cv, x + W - 13, y + 32, night);
+            door(cv, x + W / 2 - 3, y + H - 10, 8);
+        } else if (age == Age::Craft) {
+            // Long workshop hall: flat-ish tiled roof, no bell tower, big side chimney, loading dock
+            // left: main hall block
+            cv.rect(x + 2, y + 16, W - 18, H - 18, 0xfdf7ed);
+            cv.rect(x + W - 20, y + 16, 4, H - 18, darken(0xfdf7ed, 0.12f));
+            // sawtooth / stepped workshop roof (distinct from Village gable)
+            for (int seg = 0; seg < 3; seg++) {
+                int sx0 = x + 2 + seg * ((W - 18) / 3);
+                int sw = (W - 18) / 3;
+                for (int r = 0; r < 10; r++) {
+                    int inset = r < 5 ? (5 - r) : (r - 5);
+                    for (int i = inset; i < sw - inset; i++)
+                        cv.put(sx0 + i, y + 6 + r, (r % 2) ? darken(roof, 0.2f) : roof);
+                }
+            }
+            cv.outlineRect(x + 1, y + 6, W - 16, H - 7, OUTLINE);
+            // right: open loading dock with posts and flat roof
+            cv.rect(x + W - 16, y + 20, 14, 4, WOOD);   // awning
+            cv.rect(x + W - 15, y + 24, 2, H - 26, WOOD_D);
+            cv.rect(x + W - 4, y + 24, 2, H - 26, WOOD_D);
+            cv.rect(x + W - 14, y + H - 4, 10, 3, WOOD_L);  // dock platform
+            // tall factory chimney
+            cv.rect(x + 4, y - 6, 6, 22, 0x8a4836);
+            for (int j = 0; j < 22; j += 3) cv.rect(x + 4 + (j/3%2)*2, y - 6 + j, 2, 1, 0x6e2727);
+            cv.outlineRect(x + 3, y - 7, 8, 24, OUTLINE);
+            smoke(cv, x + 7, y - 10, frame, seed);
+            window(cv, x + 8, y + 24, night); window(cv, x + 18, y + 24, night);
+            door(cv, x + 10, y + H - 10, 8);
+            // hanging guild sign
+            cv.line(x + 28, y + 22, x + 28, y + 28, WOOD_D);
+            cv.rect(x + 24, y + 28, 9, 6, roof); cv.outlineRect(x + 23, y + 27, 11, 8, OUTLINE);
+            // water trough + barrel row out front
+            cv.rect(x + 22, y + H - 4, 10, 3, ROCK_L); cv.rect(x + 23, y + H - 3, 8, 1, WATER_HI);
+            cv.rect(x + 34, y + H - 6, 4, 4, WOOD); cv.outlineRect(x + 33, y + H - 7, 6, 6, OUTLINE);
+        } else { // Fortified: stone keep + wall stubs + banner
+            // stone body
+            for (int j = y + 8; j < y + H - 1; j++)
+                for (int i = x + 4; i < x + W - 4; i++) {
+                    uint32_t c = ((i + j / 3) & 1) ? ROCK_L : ROCK;
+                    if ((j - y) % 4 == 0) c = darken(c, 0.12f);
+                    cv.put(i, j, c);
+                }
+            cv.outlineRect(x + 3, y + 7, W - 6, H - 8, OUTLINE);
+            // keep tower
+            int tx = x + W / 2 - 6;
+            for (int j = y - 8; j < y + 20; j++)
+                for (int i = 0; i < 12; i++) cv.put(tx + i, j, i < 3 ? ROCK_LL : (i > 8 ? ROCK : ROCK_L));
+            for (int i = -1; i < 13; i += 4) { cv.rect(tx + i, y - 12, 3, 5, ROCK_L); cv.outlineRect(tx + i - 1, y - 13, 5, 6, OUTLINE); }
+            cv.rect(tx - 1, y - 8, 14, 2, roof);
+            cv.outlineRect(tx - 1, y - 8, 14, 28, OUTLINE);
+            // short stone wall stubs around the yard
+            for (int i = x - 2; i < x + W + 2; i++) { cv.rect(i, y + H - 2, 1, 3, ROCK); cv.put(i, y + H - 3, ROCK_L); }
+            for (int j = y + 14; j < y + H; j++) { cv.rect(x - 2, j, 2, 1, ROCK); cv.rect(x + W, j, 2, 1, ROCK); }
+            // gate gap
+            cv.rect(x + W / 2 - 4, y + H - 3, 8, 4, ROAD);
+            // big banner in civ (hall) colour
+            cv.line(tx + 14, y - 6, tx + 14, y + 4, WOOD_D);
+            cv.rect(tx + 15, y - 6, 8, 6, roof); cv.put(tx + 16, y - 4, LIT);
+            window(cv, x + 8, y + 22, night); window(cv, x + W - 14, y + 22, night);
+            door(cv, x + W / 2 - 3, y + H - 12, 9);
+            smoke(cv, tx + 4, y - 14, frame, seed);
+        }
+        // stock piles in front (all ages)
         auto sparkle = [&](int sx, int sy) { if ((frame / 6 + seed) % 4 == 0) { cv.put(sx, sy, 0xffffff); cv.put(sx - 1, sy, LIT); cv.put(sx + 1, sy, LIT); cv.put(sx, sy - 1, LIT); cv.put(sx, sy + 1, LIT); } };
         float lg = w.store[(int)Res::Logs], pl = w.store[(int)Res::Planks], fd = w.food();
         logPile(cv, x + 2, y + H, std::min(6, (int)std::ceil(lg / 10.f)));
@@ -466,11 +546,45 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         break;
     }
     case BType::House: {
-        cottage(cv, x + 2, y + 4, W - 4, H - 6, roof, night, winter, 13, WALL, age);
-        cv.rect(x + W - 11, y + 1, 4, 7, 0x8a4836); cv.outlineRect(x + W - 12, y, 6, 8, OUTLINE);
-        if (!b.cold) smoke(cv, x + W - 9, y - 2, frame, seed);
-        window(cv, x + 6, y + 19, night);
-        door(cv, x + W - 13, y + H - 10, 7);
+        if (age == Age::Camp) {
+            // tiny A-frame hut
+            int base = y + H - 1, cx = x + W / 2;
+            for (int r = 0; r < 14; r++) {
+                int half = 1 + r * (W / 2 - 2) / 13;
+                for (int i = -half; i <= half; i++) {
+                    uint32_t c = ((i + r) % 4) ? 0xe0a83a : 0xd4a84b;
+                    if (i == -half || i == half) c = OUTLINE;
+                    if (r > 10 && std::abs(i) < half - 1) c = WOOD;
+                    cv.put(cx + i, base - 14 + r, c);
+                }
+            }
+            door(cv, cx - 2, base - 6, 5);
+        } else if (age == Age::Craft) {
+            // two-storey townhouse: taller walls, upper window, side chimney, hanging sign
+            cottage(cv, x + 2, y - 2, W - 4, H + 2, roof, night, winter, 11, 0xfdf7ed, age);
+            cv.rect(x + W - 10, y - 8, 4, 9, 0x8a4836); cv.outlineRect(x + W - 11, y - 9, 6, 10, OUTLINE);
+            smoke(cv, x + W - 8, y - 11, frame, seed);
+            window(cv, x + 6, y + 8, night);   // upper
+            window(cv, x + 6, y + 20, night);  // lower
+            door(cv, x + W - 13, y + H - 10, 7);
+            cv.line(x + 4, y + 16, x + 4, y + 20, WOOD_D);
+            cv.rect(x + 2, y + 20, 5, 4, roof);   // trade sign
+        } else if (age == Age::Fortified) {
+            cottage(cv, x + 2, y + 4, W - 4, H - 6, roof, night, winter, 13, WALL, age);
+            // corner turret stub
+            cv.rect(x + W - 8, y - 2, 6, 10, ROCK_L); cv.rect(x + W - 3, y - 2, 2, 10, ROCK);
+            for (int i = 0; i < 6; i += 3) cv.rect(x + W - 8 + i, y - 5, 2, 3, ROCK_L);
+            cv.outlineRect(x + W - 9, y - 5, 8, 14, OUTLINE);
+            window(cv, x + 6, y + 19, night);
+            door(cv, x + W - 14, y + H - 10, 7);
+            if (!b.cold) smoke(cv, x + 8, y + 2, frame, seed);
+        } else { // Village
+            cottage(cv, x + 2, y + 4, W - 4, H - 6, roof, night, winter, 13, WALL, age);
+            cv.rect(x + W - 11, y + 1, 4, 7, 0x8a4836); cv.outlineRect(x + W - 12, y, 6, 8, OUTLINE);
+            if (!b.cold) smoke(cv, x + W - 9, y - 2, frame, seed);
+            window(cv, x + 6, y + 19, night);
+            door(cv, x + W - 13, y + H - 10, 7);
+        }
         break;
     }
     case BType::Lumber: {
@@ -576,6 +690,17 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         }
         cv.rect(hx - 1, hy - 1, 3, 3, OUTLINE);
         sacks(cv, cx + 5, y + H, pileLevel(w, Res::Flour, w.count(BType::Mill), 3.f, 3), false);
+        if ((int)age >= (int)Age::Craft) {
+            // water wheel on the side + trough (Craft shape leap)
+            int wx = x - 2, wy = y + H - 10;
+            for (int k = 0; k < 8; k++) {
+                float a = frame * 0.08f + k * 0.785f;
+                cv.put(wx + (int)std::lround(std::cos(a) * 5), wy + (int)std::lround(std::sin(a) * 5), WOOD);
+            }
+            cv.rect(wx - 1, wy - 1, 3, 3, OUTLINE);
+            cv.rect(x + 2, y + H - 4, 12, 3, ROCK_L); cv.rect(x + 3, y + H - 3, 10, 1, WATER_HI);
+            cv.rect(x + W - 6, y + 2, 4, 8, 0x8a4836); smoke(cv, x + W - 4, y, frame, seed);
+        }
         break;
     }
     case BType::Bakery: {
@@ -593,6 +718,14 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
         cv.rect(x + W - 4, y + 16, 5, 4, 0xcd683d); cv.rect(x + W - 3, y + 16, 3, 1, SAND_L);
         int nb = pileLevel(w, Res::Bread, w.count(BType::Bakery) + 1, 8.f, 6);
         if (nb > 0) crate(cv, x + 2, y + H - 1, nb, false);
+        if ((int)age >= (int)Age::Craft) {
+            // stacked barrels + always-on chimney puff
+            for (int i = 0; i < 2; i++) {
+                cv.rect(x + W - 8 + i * 5, y + H - 7, 4, 5, WOOD); cv.outlineRect(x + W - 9 + i * 5, y + H - 8, 6, 7, OUTLINE);
+                cv.rect(x + W - 8 + i * 5, y + H - 5, 4, 1, WOOD_D);
+            }
+            if (!baking) smoke(cv, x + 7, y - 3, frame, seed);
+        }
         break;
     }
     case BType::Well: {
@@ -647,6 +780,10 @@ void drawBuilding(Canvas& cv, const World& w, const Building& b, int frame, bool
             cv.rect(ax - 1, top - 5, 3, 3, SKIN); cv.rect(ax - 1, top - 6, 3, 1, 0x4c3e24);
             cv.rect(ax - 1, top - 2, 3, 2, ROOF_SAFE);
             cv.line(ax + 3, top - 6, ax + 3, top - 1, WOOD_D);
+        }
+        if (age == Age::Fortified) {
+            cv.line(tx + tw + 1, top - 2, tx + tw + 1, top + 8, WOOD_D);
+            cv.rect(tx + tw + 2, top - 2, 6, 5, ROOF_HOME);
         }
         break;
     }
@@ -784,6 +921,15 @@ void drawWorld(const World& w, uint32_t* px, int pitchPx, int frame, const Overl
             int why = idleReason(w, b);
             cv.desat = (why >= 2) ? 0.55f : 0.f;   // stuck buildings go grey
             drawBuilding(cv, w, b, frame, lamps, winter, o.a * 13);
+            // advance ceremony: buildings flash their new silhouette one after another
+            if (w.ageCeremony > 0) {
+                int n = std::max(1, (int)w.buildings.size());
+                int which = ((24 - w.ageCeremony) * n / 24) % n;
+                if (o.a == which) {
+                    const BInfo& bin = binfo(b.type);
+                    cv.blendRect(b.x * T, b.y * T - 8, bin.w * T, bin.h * T + 12, 0xffffff, 0.35f + 0.25f * std::sin(frame * 0.8f));
+                }
+            }
             cv.desat = 0.f;
         }
     }
