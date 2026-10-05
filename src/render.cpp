@@ -340,11 +340,10 @@ void cottage(Canvas& cv, int x, int y, int w, int h, uint32_t roof, bool night, 
                 c = band ? darken(roof, 0.18f) : roof;
                 if ((i % 3) == 0) c = darken(c, 0.1f);
             } else if (age == Age::Fortified) {
-                // slate: cool grey-blue, tight rows
-                c = ((roofH - 1 - r) % 2 == 0) ? 0x5a6e9c : 0x4a5a7a;
-                if ((i + r) % 4 == 0) c = darken(c, 0.15f);
-                // keep a hint of the category tint on the ridge
-                if (r < 2) c = mixc(c, roof, 0.35f);
+                // slate rows, but category roof colour still reads (bakery stays golden, etc.)
+                uint32_t slate = ((roofH - 1 - r) % 2 == 0) ? 0x5a6e9c : 0x4a5a7a;
+                if ((i + r) % 4 == 0) slate = darken(slate, 0.15f);
+                c = mixc(slate, roof, 0.55f);
             } else {
                 bool shingleLine = (roofH - 1 - r) % 3 == 0;
                 bool tick = ((i + (r / 3) * 2) % 4) == 0 && !shingleLine;
@@ -921,21 +920,45 @@ void drawWorld(const World& w, uint32_t* px, int pitchPx, int frame, const Overl
             int why = idleReason(w, b);
             cv.desat = (why >= 2) ? 0.55f : 0.f;   // stuck buildings go grey
             drawBuilding(cv, w, b, frame, lamps, winter, o.a * 13);
+            const BInfo& bin = binfo(b.type);
+            // Craft chimneys pay off: pre-Craft houses go blue-cold in winter
+            if (winter && b.type == BType::House && b.cold && (int)w.age() < (int)Age::Craft)
+                cv.blendRect(b.x * T, b.y * T, bin.w * T, bin.h * T, 0x4d9be6, 0.22f);
+            // raider bites leave cracks on soft-age buildings
+            if (b.hurt > 4.f && (int)w.age() < (int)Age::Fortified) {
+                int cx = b.x * T + bin.w * T / 2, cy = b.y * T + bin.h * T / 2;
+                cv.line(cx - 4, cy - 2, cx + 3, cy + 4, OUTLINE);
+                cv.line(cx + 2, cy - 3, cx - 3, cy + 3, OUTLINE);
+                if (b.hurt > 14.f) cv.line(cx - 5, cy + 1, cx + 5, cy + 1, ROCK_D);
+            }
             // advance ceremony: buildings flash their new silhouette one after another
             if (w.ageCeremony > 0) {
                 int n = std::max(1, (int)w.buildings.size());
                 int which = ((24 - w.ageCeremony) * n / 24) % n;
-                if (o.a == which) {
-                    const BInfo& bin = binfo(b.type);
+                if (o.a == which)
                     cv.blendRect(b.x * T, b.y * T - 8, bin.w * T, bin.h * T + 12, 0xffffff, 0.35f + 0.25f * std::sin(frame * 0.8f));
-                }
             }
             cv.desat = 0.f;
         }
     }
     for (int ty = ty0; ty <= ty1; ty++)
         for (int tx = tx0; tx <= tx1; tx++)
-            if (w.at(tx, ty).fire > 0.f) drawFire(cv, tx * T, ty * T, hashc(tx, ty), frame);
+            if (w.at(tx, ty).fire > 0.f) {
+                const Cell& fc = w.at(tx, ty);
+                bool thatch = w.age() == Age::Camp && fc.t == Tile::Building;
+                drawFire(cv, tx * T, ty * T, hashc(tx, ty), frame);
+                if (thatch) {
+                    // big orange roof flare so players see thatch catch
+                    for (int k = 0; k < 4; k++) {
+                        int fx = tx * T + 4 + (k * 3), fy = ty * T + 2 - ((frame / 3 + k) % 5);
+                        cv.blendRect(fx, fy, 5, 4, FIRE1, 0.55f);
+                        cv.blend(fx + 2, fy - 2, FIRE2, 0.7f);
+                    }
+                } else if (fc.t == Tile::Building && (int)w.age() >= (int)Age::Village) {
+                    // shingles: small contained flicker
+                    cv.blendRect(tx * T + 5, ty * T + 4, 6, 3, FIRE2, 0.35f);
+                }
+            }
 
     // people
     for (int i = 0; i < (int)w.villagers.size(); i++) {
@@ -962,6 +985,9 @@ void drawWorld(const World& w, uint32_t* px, int pitchPx, int frame, const Overl
         }
         uint32_t skin = v.sick ? mixc(SKIN, SICK, 0.5f) : (hashc(i, 9) % 3 == 0 ? SKIN_D : SKIN);
         int fx = (int)std::lround(v.x * T) + 8, fy = (int)std::lround(v.y * T) + 14;
+        // pre-Craft winter: villagers outside shiver (horizontal jitter)
+        if (winter && (int)w.age() < (int)Age::Craft && !v.sick)
+            fx += ((frame / 4 + i) % 2) ? 1 : -1;
         if (fx < cv.cx0 - 10 || fx > cv.cx1 + 10 || fy < cv.cy0 - 16 || fy > cv.cy1 + 16) continue;
         cv.shadow(fx, fy, 3, 1, 0.3f);
         if (v.age < 6.f) sprite(cv, fx - 2, fy - 8, KID[f], 8, hair, shirt, skin, flip);
@@ -1000,6 +1026,23 @@ void drawWorld(const World& w, uint32_t* px, int pitchPx, int frame, const Overl
         float x0 = a.x0 * T, y0 = a.y0 * T - 14, x1 = a.x1 * T + 8, y1 = a.y1 * T + 6;
         cv.line(x0 + (x1 - x0) * k0, y0 + (y1 - y0) * k0, x0 + (x1 - x0) * k1, y0 + (y1 - y0) * k1, 0xffffff);
     }
+    // age payoffs, readable without UI: sparks on Fortified stone, flares on thatch jumps
+    for (const Spark& sp : w.sparks) {
+        int age = w.ticks - sp.born;
+        if (age < 0 || age > 10) continue;
+        int sx = (int)std::lround(sp.x * T), sy = (int)std::lround(sp.y * T);
+        float a = 1.f - age / 10.f;
+        if (sp.kind == 0) {   // bounce spark on stone
+            cv.blend(sx, sy - age, 0xffffff, a);
+            cv.blend(sx - 2, sy - age / 2, FIRE2, a * 0.8f);
+            cv.blend(sx + 2, sy - age / 2, FIRE2, a * 0.8f);
+            cv.blend(sx, sy + 1, ROCK_LL, a);
+        } else {   // thatch flare / crack flash
+            cv.blendRect(sx - 3, sy - 4 - age, 7, 5, FIRE1, a * 0.6f);
+            cv.blend(sx, sy - 6 - age, FIRE2, a);
+        }
+    }
+
 
     // day/night + drought tint on the visible region
     float night = 0.f;

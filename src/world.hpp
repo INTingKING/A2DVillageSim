@@ -61,6 +61,7 @@ struct Building {
     float grow = 0.f;         // farm crop growth 0..1
     float cooldown = 0.f;     // tower reload
     bool hungry = false, cold = false;   // houses: missing needs (shown as icons)
+    float hurt = 0.f;         // raider damage; Fortified stone shrugs this off
 };
 
 struct Villager {
@@ -88,6 +89,7 @@ struct Raider {
 };
 
 struct Arrow { float x0, y0, x1, y1; int born; };
+struct Spark { float x, y; int born; int kind; };  // 0 = bounce spark, 1 = roof flare
 struct LogLine { int day; std::string text; };
 constexpr int WARN_TICKS = 80;   // a disaster is announced this long (8 s at 1x) before it hits
 
@@ -118,6 +120,7 @@ public:
     bool canAdvance() const;                  // prereqs + stock
     void advanceCost(int& logs, int& planks, int& bread) const;
     bool tryAdvance();                        // pay, restyle, start ceremony
+    Age currentAge = Age::Camp;
     int ageCeremony = 0;                      // ticks left of the advance flash
     int population() const;
     int housing() const;
@@ -139,6 +142,7 @@ public:
     std::vector<Villager> villagers;
     std::vector<Raider> raiders;
     std::vector<Arrow> arrows;
+    std::vector<Spark> sparks;
     std::vector<LogLine> log;
     float store[(int)Res::Count] = {};
     int hallX = 0, hallY = 0;      // hall top-left
@@ -167,7 +171,6 @@ private:
     int lostToday = 0, diedToday = 0, popMark = 0;
     Event storyCause = Event::None; int storyDay = -100, storyIdx = -1, storyLost = 0, storyDied = 0;
     bool built[(int)BType::Count] = {};
-    Age currentAge = Age::Camp;
     void updateVillager(int vi);
     void updateBuilding(int bi);
     void updateRaiders();

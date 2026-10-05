@@ -598,7 +598,32 @@ void World::updateRaiders() {
         } else if (tgt && bd < 4.f) { gx = tgt->x; gy = tgt->y; }
         else { gx = hx; gy = hy; }
         float dx = gx - r.x, dy = gy - r.y, d = std::hypot(dx, dy);
-        if (d > 0.6f) { r.x += dx / d * 0.07f; r.y += dy / d * 0.07f; }
+        // Fortified cobble: raiders stumble (half speed) on paved roads
+        float spd = 0.07f;
+        int tx = (int)std::lround(r.x), ty = (int)std::lround(r.y);
+        if (currentAge == Age::Fortified && inside(tx, ty) && at(tx, ty).t == Tile::Road) spd *= 0.45f;
+        if (d > 0.6f) { r.x += dx / d * spd; r.y += dy / d * spd; }
+        // hit nearby buildings: Camp/Village take bites; Fortified stone sparks and pushes back
+        if (!r.fleeing) {
+            for (int bi = 0; bi < (int)buildings.size(); bi++) {
+                Building& b = buildings[bi];
+                if (!b.alive || b.type == BType::Hall) continue;
+                const BInfo& in = binfo(b.type);
+                float cx = b.x + in.w * 0.5f, cy = b.y + in.h * 0.5f;
+                float dd = std::hypot(r.x - cx, r.y - cy);
+                if (dd > in.w * 0.7f + 0.4f) continue;
+                if (currentAge == Age::Fortified) {
+                    sparks.push_back({(r.x + cx) * 0.5f, (r.y + cy) * 0.5f, ticks, 0});
+                    float nx = r.x - cx, ny = r.y - cy, nd = std::hypot(nx, ny);
+                    if (nd > 0.01f) { r.x += nx / nd * 0.35f; r.y += ny / nd * 0.35f; }
+                } else {
+                    b.hurt += 0.8f;
+                    if ((ticks + bi) % 8 == 0) sparks.push_back({cx, cy - 0.3f, ticks, 1});  // crack flash
+                    if (b.hurt >= 28.f) { destroyBuilding(bi, "smashed by raiders"); say("Raiders smashed a building!"); }
+                }
+                break;
+            }
+        }
         if (!r.fleeing && tgt && bd < 0.9f) {
             int defenders = 0;
             for (const Villager& v : villagers)
@@ -614,6 +639,7 @@ void World::updateRaiders() {
         }
     }
     arrows.erase(std::remove_if(arrows.begin(), arrows.end(), [&](const Arrow& a) { return ticks - a.born > 5; }), arrows.end());
+    sparks.erase(std::remove_if(sparks.begin(), sparks.end(), [&](const Spark& sp) { return ticks - sp.born > 10; }), sparks.end());
 }
 
 void World::updateTiles() {
@@ -644,7 +670,11 @@ void World::updateTiles() {
                 }
             if (c.fire > 0.f) {
                 bool covered = wellCover[i];
-                c.fire -= covered ? 6.f : 1.f;
+                bool onBld = c.t == Tile::Building && c.bld > 0;
+                // Village shingles: fire on a roof dies fast and barely jumps. Camp thatch holds and spreads.
+                float decay = covered ? 6.f : 1.f;
+                if (onBld && !covered) decay = (currentAge == Age::Camp) ? 0.55f : 2.2f;
+                c.fire -= decay;
                 if (!covered)
                     for (int k = 0; k < 4; k++) {
                         int nx = x + DX[k], ny = y + DY[k];
@@ -653,8 +683,13 @@ void World::updateTiles() {
                         Cell& n = cells[ni];
                         bool fl = n.t == Tile::Forest || n.t == Tile::Grass ||
                                   (n.t == Tile::Building && n.bld > 0);
-                        float p = n.t == Tile::Grass ? spread * 0.25f : (n.t == Tile::Building ? spread * 1.5f : spread);
-                        if (fl && n.fire <= 0.f && !wellCover[ni] && frand() < p) ignite.push_back(ni);
+                        float bp = (currentAge == Age::Camp) ? 2.8f : 0.35f;   // building-to-building
+                        float p = n.t == Tile::Grass ? spread * 0.25f : (n.t == Tile::Building ? spread * bp : spread);
+                        if (fl && n.fire <= 0.f && !wellCover[ni] && frand() < p) {
+                            ignite.push_back(ni);
+                            if (onBld && n.t == Tile::Building && currentAge == Age::Camp)
+                                sparks.push_back({nx + 0.5f, ny + 0.5f, ticks, 1});  // thatch flare jump
+                        }
                     }
                 if (c.fire <= 0.f) {
                     c.fire = 0.f;
@@ -763,11 +798,12 @@ void World::dawn() {
         say("Not enough food! " + std::to_string(n) + " went hungry.");
         for (Villager& v : villagers) if (v.alive && n-- > 0) v.health -= 30.f;
     } else for (Villager& v : villagers) if (v.alive && !v.sick) v.health = std::min(100.f, v.health + 10.f);
-    // heat
+    // heat: Craft chimneys warm a house for less firewood than open Camp/Village hearths
     bool cold = false;
     if (s == Season::Winter) {
         float heat = 1.f;
-        for (const Building& bd : buildings) if (bd.alive && bd.type == BType::House && bd.connected) heat += 0.6f;
+        float per = (int)currentAge >= (int)Age::Craft ? 0.25f : 0.6f;
+        for (const Building& bd : buildings) if (bd.alive && bd.type == BType::House && bd.connected) heat += per;
         if (blizzardDays > 0) heat *= 2.f;
         if (store[(int)Res::Logs] >= heat) store[(int)Res::Logs] -= heat;
         else {
@@ -776,7 +812,14 @@ void World::dawn() {
             for (Villager& v : villagers) if (v.alive) v.health -= 15.f;
         }
     }
-    for (Building& bd : buildings) if (bd.alive && bd.type == BType::House) { bd.hungry = hungry || food() < pop; bd.cold = cold || (s == Season::Winter && store[(int)Res::Logs] < 5.f); }
+    for (Building& bd : buildings) if (bd.alive && bd.type == BType::House) {
+        bd.hungry = hungry || food() < pop;
+        // Craft houses with chimneys stay warm unless the town is out of wood entirely
+        if ((int)currentAge >= (int)Age::Craft)
+            bd.cold = cold;
+        else
+            bd.cold = cold || (s == Season::Winter);   // pre-Craft winters always feel cold on the house
+    }
     // plague
     for (Villager& v : villagers) {
         if (!v.alive || !v.sick) continue;

@@ -396,8 +396,13 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
             if (!b.connected && b.type != BType::Hall) { status += ": no road"; scol = UI_BAD; }
             else if (in.workers) status += " " + std::to_string(b.staffed) + "/" + std::to_string(in.workers) + " workers";
             else if (b.type == BType::House) status += b.hungry ? ": hungry" : (b.cold ? ": cold" : ": 4 beds");
-            else if (b.type == BType::Hall && w.age() != Age::Fortified)
+            else if (b.type == BType::Hall && w.age() != Age::Fortified) {
                 status = std::string("Advance to ") + ageName(w.nextAge());
+                // one-line payoff so Advance is never a cosmetic trap
+                if (w.nextAge() == Age::Village) status += ": fireproof shingles";
+                else if (w.nextAge() == Age::Craft) status += ": warm chimneys";
+                else if (w.nextAge() == Age::Fortified) status += ": stone vs raiders";
+            }
             showOk = false;
         }
         if (draw) text(ren, pad, confY + 10, scol, status);
