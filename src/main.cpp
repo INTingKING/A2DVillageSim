@@ -105,7 +105,7 @@ struct Game {
     Tool tool = Tool::None; int tab = -1; BType placing = BType::House;
     int gx = 0, gy = 0; bool ghostSet = false;
     std::vector<int> roadDrag; bool painting = false;
-    int remX = -1, remY = -1; int selected = -1;
+    int remX = -1, remY = -1; int selected = -1; int selectedVillager = -1;
     std::string toast; uint64_t toastUntil = 0;
     std::vector<Btn> btns;
 
@@ -147,11 +147,11 @@ struct Game {
     void cycleSpeed() { if (paused) { paused = false; speed = 1; } else if (speed >= 8) paused = true; else speed *= 2; }
     void restart(uint32_t s, bool isDaily = false) { seed = s; daily = isDaily; warnedFor = Event::None; menu = false; world = std::make_unique<World>(s, true);
         for (int i = 0; i < (int)BType::Count; i++) unlocked[i] = fresh[i] = false;
-        updateUnlocks(true); bestSaved = false; cancelTool(); tab = -1; centerOnHall(); }
+        updateUnlocks(true); bestSaved = false; cancelTool(); selected = selectedVillager = -1; tab = -1; centerOnHall(); }
     void say(const std::string& s) { toast = s; toastUntil = SDL_GetTicks() + 2500; }
     void cancelTool() { tool = Tool::None; ghostSet = false; roadDrag.clear(); painting = false; remX = remY = -1; }
     void startPlace(BType t) {
-        tool = Tool::Place; placing = t; selected = -1;
+        tool = Tool::Place; placing = t; selected = -1; selectedVillager = -1;
         // ghost starts at the view centre
         int tx, ty; toTile(viewW / 2.f, viewY + viewH / 2.f, tx, ty);
         const BInfo& in = binfo(t);
@@ -300,7 +300,7 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
     float cardH = 34.f, cardW = (g.scrW - pad * (cols + 1)) / cols;
     int cardRows = ((int)cards.size() + cols - 1) / cols;
     float cardsY = tabsY - (cards.empty() ? 0.f : cardRows * (cardH + pad));
-    bool confirmRow = g.tool != Tool::None || g.selected >= 0;
+    bool confirmRow = g.tool != Tool::None || g.selected >= 0 || g.selectedVillager >= 0;
     // tapping a building that holds goods shows exact numbers in a small row above Close
     struct Stock { int icon; const char* label; float v; };
     std::vector<Stock> stock;
@@ -389,20 +389,32 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
         } else if (g.tool == Tool::Remove) {
             status = g.remX >= 0 ? "Half refund" : "Tap to pick";
             okLabel = "Remove"; showOk = g.remX >= 0;
+        } else if (g.selectedVillager >= 0 && g.selectedVillager < (int)w.villagers.size() && w.villagers[g.selectedVillager].alive) {
+            const Villager& v = w.villagers[g.selectedVillager];
+            status = v.name + ", " + std::to_string((int)v.age) + "y";
+            if (v.work >= 0 && v.work < (int)w.buildings.size()) status += std::string(" · ") + shortName(w.buildings[v.work].type);
+            else status += " · idle";
+            status += std::string(" · ") + traitName(v.trait);
+            showOk = false;
         } else if (g.selected >= 0) {
             const Building& b = w.buildings[g.selected];
             const BInfo& in = binfo(b.type);
             status = shortName(b.type);
             if (!b.connected && b.type != BType::Hall) { status += ": no road"; scol = UI_BAD; }
-            else if (in.workers) status += " " + std::to_string(b.staffed) + "/" + std::to_string(in.workers) + " workers";
-            else if (b.type == BType::House) status += b.hungry ? ": hungry" : (b.cold ? ": cold" : ": 4 beds");
             else if (b.type == BType::Hall && w.age() != Age::Fortified) {
                 status = std::string("Advance to ") + ageName(w.nextAge());
-                // one-line payoff so Advance is never a cosmetic trap
                 if (w.nextAge() == Age::Village) status += ": fireproof shingles";
                 else if (w.nextAge() == Age::Craft) status += ": warm chimneys";
                 else if (w.nextAge() == Age::Fortified) status += ": stone vs raiders";
-            }
+            } else if (b.type == BType::House || b.type == BType::Hall) {
+                std::vector<int> res; w.residentsOf(g.selected, res);
+                if (res.empty()) status += b.type == BType::House ? (b.hungry ? ": hungry" : (b.cold ? ": cold" : ": empty")) : ": empty";
+                else {
+                    status += ":";
+                    for (size_t i = 0; i < res.size() && i < 3; i++) status += (i ? "," : " ") + w.villagers[res[i]].name;
+                    if (res.size() > 3) status += " +" + std::to_string((int)res.size() - 3);
+                }
+            } else if (in.workers) status += " " + std::to_string(b.staffed) + "/" + std::to_string(in.workers) + " workers";
             showOk = false;
         }
         if (draw) text(ren, pad, confY + 10, scol, status);
@@ -416,7 +428,7 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
             }
         }
         // EE2-style: Advance on the town hall, cost shown as the piles you already know
-        bool hallSel = g.tool == Tool::None && g.selected >= 0 && w.buildings[g.selected].type == BType::Hall && w.age() != Age::Fortified;
+        bool hallSel = g.tool == Tool::None && g.selectedVillager < 0 && g.selected >= 0 && w.buildings[g.selected].type == BType::Hall && w.age() != Age::Fortified;
         if (hallSel) {
             int logs = 0, planks = 0, bread = 0; w.advanceCost(logs, planks, bread);
             SDL_FRect adv{g.scrW - pad - 72.f, confY, 72.f, btnH};
@@ -435,7 +447,7 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
             }
             showOk = false;
         }
-        if (g.tool != Tool::None || g.selected >= 0) {
+        if (g.tool != Tool::None || g.selected >= 0 || g.selectedVillager >= 0) {
             g.btns.push_back({no, B_CANCEL});
             if (draw) { button(ren, no, UI_PANEL, false, 0); centered(ren, no, no.y + 10, UI_DIM, g.tool == Tool::None ? "Close" : "Cancel"); }
         }
@@ -533,6 +545,24 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
             tri(1.35f, 0x14101a); tri(1.f, a.col);
         }
     }
+
+    // Name chips over villagers (birth / sick / death), ~2 s
+    if (draw && !g.menu) {
+        for (const auto& c : w.nameChips) {
+            float wx = c.x * TILE_PX + 8.f, wy = c.y * TILE_PX - 4.f;
+            float sx = (wx - g.camX) * g.zoom, sy = g.viewY + (wy - g.camY) * g.zoom;
+            if (sx < -40 || sy < g.viewY - 10 || sx > g.viewW + 40 || sy > g.viewY + g.viewH) continue;
+            float tw = 8.f * c.text.size();
+            rect(ren, sx - tw / 2 - 3, sy - 8, tw + 6, 12, UI_BG, 210);
+            text(ren, sx - tw / 2, sy - 6, UI_TEXT, c.text);
+        }
+        // trait hint under villager card
+        if (g.selectedVillager >= 0 && g.selectedVillager < (int)w.villagers.size() && w.villagers[g.selectedVillager].alive) {
+            const Villager& v = w.villagers[g.selectedVillager];
+            text(ren, 4, (float)g.viewY + 4, UI_DIM, traitHint(v.trait));
+        }
+    }
+
     if (g.menu) {   // start screen over the (paused) world
         char buf[64];
         g.btns.push_back({SDL_FRect{0, 0, (float)g.scrW, (float)g.scrH}, B_BLOCK});   // swallow taps on the map
@@ -541,22 +571,17 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
         SDL_FRect tb{0, cy, (float)g.scrW, 16};
         std::string title = "VILLAGE SIM";
         text(ren, (g.scrW - 16.f * title.size()) / 2, cy, UI_TEXT, title, 2.f);
-        centered(ren, tb, cy + 24, UI_DIM, "You can't win.");
-        centered(ren, tb, cy + 34, UI_DIM, "You can only last.");
-        uint32_t ds = todaySeed();
-        std::snprintf(buf, sizeof(buf), "%04u-%02u-%02u UTC", ds / 10000, ds / 100 % 100, ds % 100);
-        SDL_FRect d{bx, cy + 60, bw, 58};
-        g.btns.push_back({d, B_DAILY});
-        button(ren, d, 0x3e2a4f, true, UI_WARN);
-        text(ren, (g.scrW - 16.f * 5) / 2, d.y + 8, UI_WARN, "DAILY", 2.f);
-        centered(ren, d, d.y + 28, UI_TEXT, buf);
-        std::string bd = g.bestDaily > 0 ? "Today's best: " + std::to_string(g.bestDaily) + " days" : "Not played yet";
-        centered(ren, d, d.y + 40, g.bestDaily > 0 ? UI_GOOD : UI_DIM, bd);
-        SDL_FRect n{bx, d.y + d.h + 10, bw, 40};
+        centered(ren, tb, cy + 24, UI_DIM, "Every town is a story.");
+        centered(ren, tb, cy + 34, UI_DIM, "Make this one last.");
+        SDL_FRect n{bx, cy + 60, bw, 48};
         g.btns.push_back({n, B_PLAY});
         button(ren, n, 0x1a7a4c, true, UI_GOOD);
-        centered(ren, n, n.y + 9, UI_TEXT, "New world");
-        centered(ren, n, n.y + 22, 0xc7dcd0, g.best > 0 ? "Best: " + std::to_string(g.best) + " days" : "Random map");
+        centered(ren, n, n.y + 10, UI_TEXT, "New world");
+        centered(ren, n, n.y + 26, 0xc7dcd0, "Fresh map every run");
+        if (g.best > 0) {
+            std::snprintf(buf, sizeof(buf), "Your longest town: %d days", g.best);
+            centered(ren, tb, n.y + n.h + 16, UI_DIM, buf);
+        }
         return;
     }
     if (w.gameOver()) {
@@ -576,10 +601,10 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
         float bh = std::min(maxH, height()), by = g.viewY + (g.viewH - bh) / 2;
         rect(ren, bx, by, bw, bh, UI_BG, 245);
         rect(ren, bx, by, bw, 1, 0x5d4b62);
-        text(ren, bx + 8, by + 8, UI_BAD, g.daily ? "DAILY RUN OVER" : "YOUR TOWN FELL");
-        int best = g.daily ? g.bestDaily : g.best;
-        std::snprintf(buf, sizeof(buf), "Survived %d days  Best %d", w.day(), best); text(ren, bx + 8, by + 20, UI_TEXT, buf);
-        std::snprintf(buf, sizeof(buf), "Born %d  Died %d", w.births, w.deaths); text(ren, bx + 8, by + 32, UI_DIM, buf);
+        text(ren, bx + 8, by + 8, UI_BAD, "YOUR TOWN FELL");
+        std::snprintf(buf, sizeof(buf), "Survived %d days", w.day()); text(ren, bx + 8, by + 20, UI_TEXT, buf);
+        if (g.best > 0) { std::snprintf(buf, sizeof(buf), "Your longest: %d", g.best); text(ren, bx + 8, by + 32, UI_DIM, buf); }
+        else { std::snprintf(buf, sizeof(buf), "Born %d  Died %d", w.births, w.deaths); text(ren, bx + 8, by + 32, UI_DIM, buf); }
         float ly = by + 50;
         for (size_t i = 0; i < es.size(); i++) {
             bool last = i + 1 == es.size(), bad = es[i].l->text.find(" took ") != std::string::npos;
@@ -587,11 +612,9 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
             for (size_t k = 0; k < es[i].lines.size() && ly < by + bh - 44; k++, ly += 10) text(ren, bx + 8, ly, col, (k ? "      " : "") + es[i].lines[k]);
             ly += 2;
         }
-        float half = (bw - 16 - 6) / 2;
-        SDL_FRect b{bx + 8, by + bh - 34, half, 28}, d{bx + 14 + half, by + bh - 34, half, 28};
-        g.btns.push_back({b, B_RESTART}); g.btns.push_back({d, B_DAILY});
+        SDL_FRect b{bx + 8, by + bh - 34, bw - 16, 28};
+        g.btns.push_back({b, B_RESTART});
         button(ren, b, 0x1a7a4c, true, UI_GOOD); centered(ren, b, b.y + 10, UI_TEXT, "New world");
-        button(ren, d, UI_PANEL, true, UI_WARN); centered(ren, d, d.y + 10, UI_WARN, "Daily");
     }
 }
 
@@ -606,14 +629,13 @@ static void pressButton(Game& g, int id) {
     if (id == B_SPEED) g.cycleSpeed();
     else if (id == B_ZIN) g.stepZoomCenter(+1);
     else if (id == B_ZOUT) g.stepZoomCenter(-1);
-    else if (id == B_RESTART) g.restart(g.daily ? todaySeed() + 7919u * (uint32_t)SDL_GetTicks() : g.seed + 1);
-    else if (id == B_DAILY) g.restart(todaySeed(), true);
-    else if (id == B_PLAY) g.menu = false;
+    else if (id == B_RESTART || id == B_PLAY) g.restart((uint32_t)SDL_GetTicks() ^ (g.seed * 2654435761u) ^ 0xA2D6u, false);
+    else if (id == B_DAILY) g.restart((uint32_t)SDL_GetTicks() ^ 0xDA11U, false);   // kept for --daily shots; not on the menu
     else if (id >= B_TAB0 && id < B_TAB0 + 4) { g.tab = g.tab >= 0 ? -1 : 0; if (g.tool != Tool::Place) g.cancelTool(); }
-    else if (id == B_ROAD) { bool on = g.tool == Tool::Road; g.cancelTool(); g.selected = -1; if (!on) { g.tool = Tool::Road; g.tab = -1; } }
-    else if (id == B_REMOVE) { bool on = g.tool == Tool::Remove; g.cancelTool(); g.selected = -1; if (!on) { g.tool = Tool::Remove; g.tab = -1; } }
+    else if (id == B_ROAD) { bool on = g.tool == Tool::Road; g.cancelTool(); g.selected = g.selectedVillager = -1; if (!on) { g.tool = Tool::Road; g.tab = -1; } }
+    else if (id == B_REMOVE) { bool on = g.tool == Tool::Remove; g.cancelTool(); g.selected = g.selectedVillager = -1; if (!on) { g.tool = Tool::Remove; g.tab = -1; } }
     else if (id >= B_CARD0 && id < B_CARD0 + (int)BType::Count) { g.fresh[id - B_CARD0] = false; g.startPlace((BType)(id - B_CARD0)); }
-    else if (id == B_CANCEL) { g.cancelTool(); g.selected = -1; }
+    else if (id == B_CANCEL) { g.cancelTool(); g.selected = -1; g.selectedVillager = -1; }
     else if (id == B_ADVANCE) { if (!w.tryAdvance()) g.say("Need goods or buildings first"); }
     else if (id == B_OK) {
         if (g.tool == Tool::Place) g.confirmPlace();
@@ -635,7 +657,13 @@ static void mapTap(Game& g, float lx, float ly, bool mouse) {
         }
         break;
     case Tool::Road: g.roadDrag.clear(); g.addRoadTile(tx, ty); g.commitRoad(); break;
-    case Tool::None: g.selected = w.inside(tx, ty) ? w.buildingAt(tx, ty) : -1; break;
+    case Tool::None: {
+        float wx, wy; g.toWorld(lx, ly, wx, wy);
+        int vi = w.villagerAt(wx / TILE_PX - 0.5f, wy / TILE_PX - 0.9f, 0.85f);
+        if (vi >= 0) { g.selectedVillager = vi; g.selected = -1; }
+        else { g.selectedVillager = -1; g.selected = w.inside(tx, ty) ? w.buildingAt(tx, ty) : -1; }
+        break;
+    }
     }
 }
 
@@ -866,8 +894,7 @@ int main(int argc, char** argv) {
         if (acc > 0.5) acc = 0.5;
         while (acc >= 0.1) { acc -= 0.1; if (!g.paused && !g.menu) for (int s = 0; s < g.speed; s++) g.world->tick(); }
         if (g.world->gameOver() && !g.bestSaved) {
-            int& best = g.daily ? g.bestDaily : g.best;
-            if (g.world->day() > best) { best = g.world->day(); saveBest(best, g.daily); }
+            if (g.world->day() > g.best) { g.best = g.world->day(); saveBest(g.best, false); }
             g.bestSaved = true;
         }
         g.updateUnlocks(false);
@@ -876,12 +903,15 @@ int main(int argc, char** argv) {
             g.warnedFor = g.world->pending;
         }
         if (g.selected >= 0 && (g.selected >= (int)g.world->buildings.size() || !g.world->buildings[g.selected].alive)) g.selected = -1;
+        if (g.selectedVillager >= 0 && (g.selectedVillager >= (int)g.world->villagers.size() || !g.world->villagers[g.selectedVillager].alive)) g.selectedVillager = -1;
 
         Overlay ov;
         if (g.tool == Tool::Place) { ov.ghost = (int)g.placing; ov.gx = g.gx; ov.gy = g.gy; ov.ghostOk = g.world->canPlace(g.placing, g.gx, g.gy) && g.world->canAfford(g.placing); }
         ov.roadMode = g.tool == Tool::Road; ov.roadTiles = g.roadDrag;
         if (g.tool == Tool::Remove) { ov.demolishX = g.remX; ov.demolishY = g.remY; }
         ov.selected = g.selected;
+        ov.selectedVillager = g.selectedVillager;
+        ov.detail = g.zoom >= 0.99f;
         ov.markScale = g.zoom < 0.99f ? (int)std::ceil(1.f / g.zoom - 0.01f) : 1;   // keep need bubbles readable when zoomed out
 
         ui(ren, g, false);   // measure first so the map viewport is right this frame

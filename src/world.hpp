@@ -64,6 +64,10 @@ struct Building {
     float hurt = 0.f;         // raider damage; Fortified stone shrugs this off
 };
 
+enum class Trait : uint8_t { Brave, LazyBaker, Afraid, Count };
+const char* traitName(Trait t);
+const char* traitHint(Trait t);   // short card line
+
 struct Villager {
     float x = 0, y = 0;   // tile coords (float)
     float health = 100.f;
@@ -73,11 +77,23 @@ struct Villager {
     bool sick = false;
     bool alive = true;
     int work = -1;        // building index or -1
+    int home = -1;        // house or hall index
     int task = 0;
     int tx = -1, ty = -1;
     bool carrying = false;
+    std::string name;
+    Trait trait = Trait::Brave;
+    int hair = 0;         // palette index
+    int bornDay = 1;
     std::vector<int> path;
     size_t pathPos = 0;
+};
+
+// Floating name chip over a villager (birth / sick / death), ~2 s.
+struct NameChip {
+    float x = 0, y = 0;
+    std::string text;
+    int born = 0;         // world ticks
 };
 
 struct Raider {
@@ -107,6 +123,8 @@ public:
     bool placeRoad(int x, int y);                 // 1 log per tile
     bool demolish(int x, int y);                  // building or road, refunds half
     int buildingAt(int x, int y) const;
+    int villagerAt(float x, float y, float r = 0.9f) const;  // nearest alive within r tiles
+    void residentsOf(int bi, std::vector<int>& out) const;   // villagers with home == bi
 
     Cell& at(int x, int y) { return cells[y * MAP_W + x]; }
     const Cell& at(int x, int y) const { return cells[y * MAP_W + x]; }
@@ -144,6 +162,7 @@ public:
     std::vector<Arrow> arrows;
     std::vector<Spark> sparks;
     std::vector<LogLine> log;
+    std::vector<NameChip> nameChips;
     float store[(int)Res::Count] = {};
     int hallX = 0, hallY = 0;      // hall top-left
     int droughtDays = 0, blizzardDays = 0;
@@ -179,6 +198,8 @@ private:
     bool nearestTile(int sx, int sy, Tile t, int r, int& ox, int& oy) const;
     void spawnVillager(float x, float y, float age);
     void kill(Villager& v, const char* why);
+    void assignHomes();
+    void pushChip(const Villager& v, const std::string& text);
     void say(const std::string& s);
     bool take(Res r, float n);
 public:

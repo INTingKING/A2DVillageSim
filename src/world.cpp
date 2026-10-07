@@ -103,9 +103,43 @@ const char* categoryName(Category c) {
     return n[(int)c];
 }
 
+const char* traitName(Trait t) {
+    static const char* n[] = {"brave", "lazy baker", "afraid of fire"};
+    return n[(int)t % (int)Trait::Count];
+}
+const char* traitHint(Trait t) {
+    static const char* n[] = {"Runs toward fires", "Bakes slower", "Hides during raids"};
+    return n[(int)t % (int)Trait::Count];
+}
+
+static const char* pickName(std::mt19937& rng, const std::vector<Villager>& have) {
+    static const char* names[] = {
+        "Mira","Tor","Anya","Ren","Sela","Bren","Ivo","Nia","Kade","Lina",
+        "Osa","Pim","Rafi","Tessa","Ulf","Vera","Wren","Yara","Zed","Cora",
+        "Dara","Elk","Finn","Gita","Hale","Iris","Joss","Kira","Lars","Mae"
+    };
+    constexpr int N = (int)(sizeof(names) / sizeof(names[0]));
+    for (int try_ = 0; try_ < N * 2; try_++) {
+        const char* cand = names[(int)(((uint64_t)(uint32_t)rng() * N) >> 32)];
+        bool used = false;
+        for (const Villager& v : have) if (v.alive && v.name == cand) { used = true; break; }
+        if (!used) return cand;
+    }
+    return names[(int)(((uint64_t)(uint32_t)rng() * N) >> 32)];
+}
+
 World::World(uint32_t seed, bool disasters) : disastersOn(disasters), rng(seed) {
     generate();
-    note("The town was founded by " + std::to_string(population()) + " villagers.");
+    {
+        std::string who;
+        for (const Villager& v : villagers) if (v.alive) {
+            if (!who.empty()) who += ", ";
+            who += v.name;
+            if (who.size() > 48) { who += "..."; break; }
+        }
+        note("The town was founded by " + who + ".");
+        for (const Villager& v : villagers) if (v.alive) pushChip(v, v.name);
+    }
     popMark = population();
 }
 
@@ -352,6 +386,7 @@ void World::refresh() {
             for (int x = (int)cx - r; x <= (int)cx + r; x++)
                 if (inside(x, y) && std::hypot(x - cx, y - cy) <= in.radius) cov[y * MAP_W + x] = 1;
     }
+    assignHomes();
     assignJobs();
 }
 
@@ -402,15 +437,72 @@ int World::jobsOpen() const {
     return n;
 }
 
+void World::pushChip(const Villager& v, const std::string& text) {
+    nameChips.push_back({v.x, v.y, text, ticks});
+    if (nameChips.size() > 12) nameChips.erase(nameChips.begin());
+}
+
+void World::assignHomes() {
+    // Clear soft assignments, then fill hall (6) and houses (4) that are connected.
+    for (Villager& v : villagers) if (v.alive) v.home = -1;
+    auto capacity = [&](const Building& b) -> int {
+        if (!b.alive || !b.connected) return 0;
+        if (b.type == BType::Hall) return 6;
+        if (b.type == BType::House) return 4;
+        return 0;
+    };
+    for (int bi = 0; bi < (int)buildings.size(); bi++) {
+        int cap = capacity(buildings[bi]);
+        if (!cap) continue;
+        int used = 0;
+        for (Villager& v : villagers) {
+            if (!v.alive || v.home >= 0) continue;
+            v.home = bi;
+            if (++used >= cap) break;
+        }
+    }
+}
+
+void World::residentsOf(int bi, std::vector<int>& out) const {
+    out.clear();
+    for (int i = 0; i < (int)villagers.size(); i++)
+        if (villagers[i].alive && villagers[i].home == bi) out.push_back(i);
+}
+
+int World::villagerAt(float x, float y, float r) const {
+    int best = -1; float bd = r;
+    for (int i = 0; i < (int)villagers.size(); i++) {
+        const Villager& v = villagers[i];
+        if (!v.alive) continue;
+        float d = std::hypot(v.x - x, v.y - y);
+        if (d <= bd) { bd = d; best = i; }
+    }
+    return best;
+}
+
 void World::spawnVillager(float x, float y, float age) {
-    Villager v; v.x = x; v.y = y; v.age = age; v.maxAge = frand(55.f, 80.f);
+    Villager v;
+    v.x = x; v.y = y; v.age = age; v.maxAge = frand(55.f, 80.f);
+    v.name = pickName(rng, villagers);
+    v.trait = (Trait)irand(0, (int)Trait::Count - 1);
+    v.hair = irand(0, 4);
+    v.bornDay = day() + 1;
     villagers.push_back(v);
+    assignHomes();
+    if (age < 1.f) {
+        say(v.name + " was born.");
+        pushChip(villagers.back(), v.name);
+        note(v.name + " was born (" + traitName(v.trait) + ").");
+    }
 }
 
 void World::kill(Villager& v, const char* why) {
     if (!v.alive) return;
     v.alive = false; deaths++; diedToday++;
-    say(std::string("A villager died: ") + why + ".");
+    std::string line = v.name + " the " + traitName(v.trait) + " died: " + why + ".";
+    say(line);
+    note(line);
+    pushChip(v, v.name);
 }
 
 bool World::nearestTile(int sx, int sy, Tile t, int r, int& ox, int& oy) const {
@@ -457,7 +549,7 @@ void World::updateVillager(int vi) {
     v.age += 1.f / TICKS_PER_DAY;
     int vx = std::clamp((int)std::lround(v.x), 0, MAP_W - 1);
     int vy = std::clamp((int)std::lround(v.y), 0, MAP_H - 1);
-    if (at(vx, vy).fire > 0.f) v.health -= 1.5f;
+    if (at(vx, vy).fire > 0.f) v.health -= (v.trait == Trait::Brave ? 0.7f : 1.5f);
     if (v.health <= 0.f) { kill(v, at(vx, vy).fire > 0.f ? "burned" : (v.sick ? "plague" : "hunger or cold")); return; }
 
     auto goTo = [&](int tx, int ty, int task) {
@@ -475,6 +567,24 @@ void World::updateVillager(int vi) {
         if (d <= sp) { v.x = gx; v.y = gy; v.pathPos++; }
         else { v.x += dx / d * sp; v.y += dy / d * sp; }
         return;
+    }
+
+    // Afraid: hide at the hall while raiders are in town
+    if (v.trait == Trait::Afraid && raidersAlive() > 0) {
+        int hx, hy; doorOf(buildings[0], hx, hy);
+        if (std::hypot(v.x - hx, v.y - hy) > 1.2f) goTo(hx, hy, T_WANDER);
+        return;
+    }
+    // Brave: once, run toward the nearest fire (shows the trait without UI)
+    if (v.trait == Trait::Brave) {
+        int fx = -1, fy = -1; float bd = 10.f;
+        for (int y = vy - 8; y <= vy + 8; y++)
+            for (int x = vx - 8; x <= vx + 8; x++) {
+                if (!inside(x, y) || at(x, y).fire <= 0.f) continue;
+                float d = std::hypot((float)(x - vx), (float)(y - vy));
+                if (d < bd) { bd = d; fx = x; fy = y; }
+            }
+        if (fx >= 0 && bd > 1.2f) { goTo(fx, fy, T_WANDER); return; }
     }
 
     if (v.work < 0) {
@@ -553,9 +663,13 @@ void World::updateBuilding(int bi) {
     case BType::Mill:
         if (store[(int)Res::Wheat] >= 2.f && (b.work += 1.f) >= 40.f) { b.work = 0.f; store[(int)Res::Wheat] -= 2.f; store[(int)Res::Flour] += 2.f; }
         break;
-    case BType::Bakery:
-        if (store[(int)Res::Flour] >= 1.f && (b.work += 1.f) >= 30.f) { b.work = 0.f; store[(int)Res::Flour] -= 1.f; store[(int)Res::Bread] += 2.f; }
+    case BType::Bakery: {
+        float need = 30.f;
+        for (const Villager& v : villagers)
+            if (v.alive && v.work == bi && v.trait == Trait::LazyBaker) need = 48.f;
+        if (store[(int)Res::Flour] >= 1.f && (b.work += 1.f) >= need) { b.work = 0.f; store[(int)Res::Flour] -= 1.f; store[(int)Res::Bread] += 2.f; }
         break;
+    }
     case BType::Sawmill:
         if (store[(int)Res::Logs] >= 9.f && (b.work += 1.f) >= 25.f)   // keeps a few logs for firewood and roads
             { b.work = 0.f; store[(int)Res::Logs] -= 1.f; store[(int)Res::Planks] += 1.f; }
@@ -714,9 +828,13 @@ void World::startEvent(Event e) {
         int n = 1 + day() / 14, done = 0;
         for (int tries = 0; tries < 50 && done < n && !villagers.empty(); tries++) {
             Villager& v = villagers[irand(0, (int)villagers.size() - 1)];
-            if (v.alive && !v.sick) { v.sick = true; done++; }
+            if (v.alive && !v.sick) {
+                v.sick = true; done++;
+                say(v.name + " fell sick.");
+                pushChip(v, v.name);
+            }
         }
-        say("PLAGUE! Villagers are falling sick. A healer helps.");
+        if (done) say("PLAGUE! A healer helps.");
         break;
     }
     case Event::Wildfire: {
@@ -832,7 +950,9 @@ void World::dawn() {
         if (frand() < (healed ? 0.6f : 0.15f)) { v.sick = false; continue; }
         if (healed) continue;
         for (Villager& o : villagers)
-            if (o.alive && !o.sick && &o != &v && std::hypot(o.x - v.x, o.y - v.y) < 2.5f && frand() < 0.3f) o.sick = true;
+            if (o.alive && !o.sick && &o != &v && std::hypot(o.x - v.x, o.y - v.y) < 2.5f && frand() < 0.3f) {
+                o.sick = true; say(o.name + " fell sick."); pushChip(o, o.name);
+            }
     }
     for (Villager& v : villagers) if (v.alive && v.age > v.maxAge) kill(v, "old age");
     for (Villager& v : villagers) if (v.alive && v.health <= 0.f) kill(v, v.sick ? "plague" : "hunger or cold");
@@ -843,7 +963,7 @@ void World::dawn() {
         int n = std::min(cap - pop, std::max(1, (cap - 6) / 8 + 1)), born = 0;
         for (int i = 0; i < n; i++)
             if (frand() < 0.6f) { spawnVillager(hallX + 1 + frand(-1.f, 1.f), hallY + 3.2f, 0.f); born++; }
-        if (born) { births += born; say(std::to_string(born) + (born == 1 ? " child was born." : " children were born.")); }
+        if (born) births += born;   // spawnVillager already names each birth
     }
     if (droughtDays > 0 && --droughtDays == 0) say("The drought has ended.");
     if (blizzardDays > 0 && --blizzardDays == 0) say("The blizzard has passed.");
@@ -876,6 +996,8 @@ void World::dawn() {
 void World::tick() {
     if (over) return;
     if (ageCeremony > 0) --ageCeremony;
+    nameChips.erase(std::remove_if(nameChips.begin(), nameChips.end(),
+        [&](const NameChip& c) { return ticks - c.born > 20; }), nameChips.end());   // ~2 s
     if (ticks % TICKS_PER_DAY == 0) dawn();
     // late game: a second disaster can be announced in the afternoon
     if (disastersOn && ticks % TICKS_PER_DAY == TICKS_PER_DAY / 2 && pending == Event::None && day() > 35 &&

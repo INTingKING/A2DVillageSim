@@ -968,7 +968,7 @@ void drawWorld(const World& w, uint32_t* px, int pitchPx, int frame, const Overl
         int f = moving ? (frame / 5 + i) % 2 : 0;
         bool flip = false;
         if (moving) { int ni = v.path[v.pathPos]; flip = (ni % MAP_W) < v.x - 0.01f; }
-        uint32_t hair = v.age > 50.f ? 0xdcd6e0 : HAIR[hashc(i, 3) % 5];
+        uint32_t hair = v.age > 50.f ? 0xdcd6e0 : HAIR[v.hair % 5];
         // clothes follow the town age: muted camp tunics -> dyed village shirts -> craft dyes -> fortified cloaks
         uint32_t shirt;
         if (v.sick) shirt = SICK;
@@ -1002,7 +1002,18 @@ void drawWorld(const World& w, uint32_t* px, int pitchPx, int frame, const Overl
                 cv.rect(fx - 3, fy - 14, 6, 2, darken(shirt, 0.35f));
                 cv.rect(fx - 2, fy - 15, 4, 1, OUTLINE);
             }
+            // trait prop at 1x+: apron / scarf / brave sash
+            if (ov.detail && v.age >= 6.f) {
+                if (v.trait == Trait::LazyBaker) {
+                    cv.rect(fx - 3, fy - 6, 6, 2, 0xfdf7ed); cv.put(fx - 3, fy - 5, OUTLINE); cv.put(fx + 2, fy - 5, OUTLINE);
+                } else if (v.trait == Trait::Afraid) {
+                    cv.rect(fx - 2, fy - 9, 4, 2, 0x4d9be6); cv.put(fx - 2, fy - 9, OUTLINE); cv.put(fx + 1, fy - 9, OUTLINE);
+                } else if (v.trait == Trait::Brave) {
+                    cv.rect(fx - 3, fy - 5, 6, 1, ROOF_HOME);
+                }
+            }
         }
+        if (ov.selectedVillager == i) cv.outlineRect(fx - 5, fy - 14, 10, 16, 0xffffff);
         if (v.carrying && v.work >= 0) {   // carried good above the head
             bool logs = w.buildings[v.work].type == BType::Lumber;
             int cxp = fx - 2, cyp = fy - (v.age < 6.f ? 12 : 16);
