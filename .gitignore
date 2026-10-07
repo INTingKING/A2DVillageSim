@@ -1,0 +1,5 @@
+build/
+.cache/
+.DS_Store
+*.user
+best_score.txt
