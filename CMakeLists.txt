@@ -35,3 +35,7 @@ add_executable(villagesim_test src/selftest.cpp)
 target_link_libraries(villagesim_test PRIVATE villagesim_core)
 enable_testing()
 add_test(NAME sim_selftest COMMAND villagesim_test)
+
+# Art review sheet: every building in every age (no SDL).
+add_executable(villagesim_gallery tools/gallery.cpp src/render.cpp)
+target_link_libraries(villagesim_gallery PRIVATE villagesim_core)
