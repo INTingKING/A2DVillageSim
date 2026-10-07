@@ -29,6 +29,12 @@ target_include_directories(villagesim_core PUBLIC src)
 
 add_executable(villagesim src/main.cpp src/render.cpp)
 target_link_libraries(villagesim PRIVATE villagesim_core SDL3::SDL3)
+# Windows with a shared, pre-installed SDL3: copy SDL3.dll next to the exe.
+if(WIN32 AND NOT CMAKE_VERSION VERSION_LESS 3.21)
+  add_custom_command(TARGET villagesim POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:villagesim> $<TARGET_FILE_DIR:villagesim>
+    COMMAND_EXPAND_LISTS)
+endif()
 
 # Headless simulation test (no window, no SDL).
 add_executable(villagesim_test src/selftest.cpp)
