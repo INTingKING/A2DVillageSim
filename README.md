@@ -22,7 +22,8 @@ There are no god powers: wells, healers and watchtowers are your only protection
 - **Warnings:** every disaster is announced 8 game seconds before it hits, with a countdown chip under the day counter, a glow on the edge raiders come from, and a tint for fire, plague or blizzard. A warning drops the speed back to x1.
 - **It gets harder:** disasters come more often and hit harder as the days pass, and after day 35 a second one can arrive in the afternoon. Every town falls eventually.
 - **The town's story:** when your town falls, the game-over screen tells its story day by day: founding, key buildings, growth, winters survived, the disasters that hit hardest, and the end.
-- **Daily run:** the start screen has a big Daily button (also on the game-over screen, or `--daily`). It starts today's world, the same for everyone on the same UTC date, with its own best score. The sim uses its own random-number mapping so desktop and phone builds generate the same world from one seed.
+- **Every run is a new world:** New world always rolls a fresh random seed and a seeded town name. There is no shared daily ladder; the start screen only says how long your longest town lasted.
+- **Citizens:** every villager has a name, a home and one of twelve traits. Brave ones run toward fires (bucket), lazy bakers bake slower (apron), and the afraid hide at the hall during raids (scarf); the other traits are flavour on their card. Births, sickness and deaths float a name chip and go into the town story. Tap a villager or a house to see who they are.
 - Roof colours match the stripe on each build card: red-brown homes, straw food, green-brown wood, slate safety.
 - Buildings unlock as you go: a new world offers house, farm, fisher and lumber camp. The mill appears once you have wheat, the bakery once you have flour, the sawmill once you have a lumber camp, the well on day 3, and the healer and tower on day 8 or as soon as sickness or raiders show up. New cards get a small yellow dot.
 
@@ -41,17 +42,33 @@ right or middle drag pans, the wheel zooms, `Esc` cancels, `Space` pauses, `+`/`
 
 ## Build
 
-Needs CMake 3.20+ and a C++17 compiler. SDL3 is used from your system if found, otherwise it is downloaded and built automatically.
+You need CMake 3.20+ and a C++17 compiler. SDL3 is used from your system if found, otherwise CMake downloads and builds it (first build takes a few minutes, needs git).
+
+### macOS
 
 ```sh
-# macOS (optional, faster first build)
-brew install sdl3
-
+xcode-select --install          # compiler, once
+brew install cmake sdl3         # sdl3 optional, makes the first build faster
+git clone https://github.com/INTingKING/A2DVillageSim.git
+cd A2DVillageSim
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-./build/villagesim            # play
-./build/villagesim_test       # balance/self-test (also: ctest --test-dir build)
+./build/villagesim
 ```
+
+### Windows
+
+Install [Visual Studio 2022](https://visualstudio.microsoft.com/) with the "Desktop development with C++" workload (includes CMake), and [Git](https://git-scm.com/). Then in a **Developer PowerShell for VS 2022**:
+
+```powershell
+git clone https://github.com/INTingKING/A2DVillageSim.git
+cd A2DVillageSim
+cmake -S . -B build
+cmake --build build --config Release
+.\build\Release\villagesim.exe
+```
+
+Self-test: `ctest --test-dir build -C Release` (Windows) or `./build/villagesim_test` (macOS/Linux). `villagesim_gallery out.ppm [winter]` renders every building in every age for art review.
 
 `./build/villagesim --seed 10 --days 16 --demo --ui well --size 540x1170 --shot out.bmp` renders one frame at a phone resolution without opening a window. `--demo` lets a scripted player build the town first, and `--ui none|well|road|info` picks what the UI shows. `--size WxH` also sets the desktop window size, so you can preview phone layouts.
 
