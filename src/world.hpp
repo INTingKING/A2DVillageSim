@@ -64,9 +64,16 @@ struct Building {
     float hurt = 0.f;         // raider damage; Fortified stone shrugs this off
 };
 
-enum class Trait : uint8_t { Brave, LazyBaker, Afraid, Count };
+enum class Trait : uint8_t {
+    // behaviour (show a prop on the sprite)
+    Brave, LazyBaker, Afraid,
+    // flavour only (card text)
+    Sings, EarlyRiser, MissesSea, SoftHands, KeepsChickens, Whistles, CollectsShells, Daydreamer, LightSleeper,
+    Count
+};
 const char* traitName(Trait t);
 const char* traitHint(Trait t);   // short card line
+bool traitHasProp(Trait t);       // only the three behaviour traits
 
 struct Villager {
     float x = 0, y = 0;   // tile coords (float)
@@ -170,6 +177,7 @@ public:
     bool disastersOn = true;
     bool over = false;
     int births = 0, deaths = 0;
+    std::string townName;          // rolled with the seed; epilogue headline
     int dirty = 1;                 // bumps when buildings/roads change (UI can watch it)
 
 private:

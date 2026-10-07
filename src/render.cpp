@@ -1002,14 +1002,15 @@ void drawWorld(const World& w, uint32_t* px, int pitchPx, int frame, const Overl
                 cv.rect(fx - 3, fy - 14, 6, 2, darken(shirt, 0.35f));
                 cv.rect(fx - 2, fy - 15, 4, 1, OUTLINE);
             }
-            // trait prop at 1x+: apron / scarf / brave sash
-            if (ov.detail && v.age >= 6.f) {
+            // only behaviour traits get a prop (bucket / apron / scarf)
+            if (ov.detail && v.age >= 6.f && traitHasProp(v.trait)) {
                 if (v.trait == Trait::LazyBaker) {
                     cv.rect(fx - 3, fy - 6, 6, 2, 0xfdf7ed); cv.put(fx - 3, fy - 5, OUTLINE); cv.put(fx + 2, fy - 5, OUTLINE);
                 } else if (v.trait == Trait::Afraid) {
                     cv.rect(fx - 2, fy - 9, 4, 2, 0x4d9be6); cv.put(fx - 2, fy - 9, OUTLINE); cv.put(fx + 1, fy - 9, OUTLINE);
                 } else if (v.trait == Trait::Brave) {
-                    cv.rect(fx - 3, fy - 5, 6, 1, ROOF_HOME);
+                    // small water bucket in hand
+                    cv.rect(fx + 3, fy - 5, 3, 3, ROCK_L); cv.rect(fx + 3, fy - 6, 3, 1, WOOD_D); cv.put(fx + 4, fy - 4, WATER_HI);
                 }
             }
         }

@@ -579,7 +579,7 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
         centered(ren, n, n.y + 10, UI_TEXT, "New world");
         centered(ren, n, n.y + 26, 0xc7dcd0, "Fresh map every run");
         if (g.best > 0) {
-            std::snprintf(buf, sizeof(buf), "Your longest town: %d days", g.best);
+            std::snprintf(buf, sizeof(buf), "Your longest town lasted %d days", g.best);
             centered(ren, tb, n.y + n.h + 16, UI_DIM, buf);
         }
         return;
@@ -601,17 +601,22 @@ static void ui(SDL_Renderer* ren, Game& g, bool draw) {
         float bh = std::min(maxH, height()), by = g.viewY + (g.viewH - bh) / 2;
         rect(ren, bx, by, bw, bh, UI_BG, 245);
         rect(ren, bx, by, bw, 1, 0x5d4b62);
-        text(ren, bx + 8, by + 8, UI_BAD, "YOUR TOWN FELL");
-        std::snprintf(buf, sizeof(buf), "Survived %d days", w.day()); text(ren, bx + 8, by + 20, UI_TEXT, buf);
-        if (g.best > 0) { std::snprintf(buf, sizeof(buf), "Your longest: %d", g.best); text(ren, bx + 8, by + 32, UI_DIM, buf); }
-        else { std::snprintf(buf, sizeof(buf), "Born %d  Died %d", w.births, w.deaths); text(ren, bx + 8, by + 32, UI_DIM, buf); }
+        text(ren, bx + 8, by + 8, UI_TEXT, w.townName.empty() ? "A town" : w.townName);
+        {
+            const char* epitaph = w.day() < 10 ? "Fell before it found its feet."
+                : (w.day() < 30 ? "A short, hard season." : "Its story ends here.");
+            text(ren, bx + 8, by + 20, UI_DIM, epitaph);
+        }
+        std::snprintf(buf, sizeof(buf), "Born %d  Died %d", w.births, w.deaths); text(ren, bx + 8, by + 32, UI_DIM, buf);
         float ly = by + 50;
         for (size_t i = 0; i < es.size(); i++) {
             bool last = i + 1 == es.size(), bad = es[i].l->text.find(" took ") != std::string::npos;
             uint32_t col = last ? UI_BAD : bad ? UI_WARN : (es[i].l->text.rfind("Built", 0) == 0 ? UI_DIM : 0xc7dcd0);
-            for (size_t k = 0; k < es[i].lines.size() && ly < by + bh - 44; k++, ly += 10) text(ren, bx + 8, ly, col, (k ? "      " : "") + es[i].lines[k]);
+            for (size_t k = 0; k < es[i].lines.size() && ly < by + bh - 56; k++, ly += 10) text(ren, bx + 8, ly, col, (k ? "      " : "") + es[i].lines[k]);
             ly += 2;
         }
+        std::snprintf(buf, sizeof(buf), "Lasted %d days", w.day());
+        text(ren, bx + 8, by + bh - 48, UI_DIM, buf);
         SDL_FRect b{bx + 8, by + bh - 34, bw - 16, 28};
         g.btns.push_back({b, B_RESTART});
         button(ren, b, 0x1a7a4c, true, UI_GOOD); centered(ren, b, b.y + 10, UI_TEXT, "New world");

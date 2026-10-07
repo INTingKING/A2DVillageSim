@@ -104,12 +104,24 @@ const char* categoryName(Category c) {
 }
 
 const char* traitName(Trait t) {
-    static const char* n[] = {"brave", "lazy baker", "afraid of fire"};
-    return n[(int)t % (int)Trait::Count];
+    static const char* n[] = {
+        "brave", "lazy baker", "afraid of fire",
+        "sings at work", "early riser", "misses the sea", "soft hands",
+        "keeps chickens", "whistles", "collects shells", "daydreamer", "light sleeper"
+    };
+    static_assert(sizeof(n) / sizeof(n[0]) == (size_t)Trait::Count, "trait names");
+    return n[(int)t];
 }
 const char* traitHint(Trait t) {
-    static const char* n[] = {"Runs toward fires", "Bakes slower", "Hides during raids"};
-    return n[(int)t % (int)Trait::Count];
+    static const char* n[] = {
+        "Runs toward fires", "Bakes slower", "Hides during raids",
+        "Hums while working", "Up before dawn", "Talks about the coast", "Gentle with tools",
+        "Scatter feed at the door", "Always a tune", "Pockets full of finds", "Stares at the clouds", "Wakes at every creak"
+    };
+    return n[(int)t];
+}
+bool traitHasProp(Trait t) {
+    return t == Trait::Brave || t == Trait::LazyBaker || t == Trait::Afraid;
 }
 
 static const char* pickName(std::mt19937& rng, const std::vector<Villager>& have) {
@@ -131,13 +143,16 @@ static const char* pickName(std::mt19937& rng, const std::vector<Villager>& have
 World::World(uint32_t seed, bool disasters) : disastersOn(disasters), rng(seed) {
     generate();
     {
+        static const char* a[] = {"Pine", "Reed", "Amber", "Ford", "Hollow", "Bracken", "Salt", "Moss", "Quill", "Haven"};
+        static const char* b[] = {"brook", "ford", "mere", "ridge", "vale", "wick", "stead", "croft", "gate", "fen"};
+        townName = std::string(a[irand(0, 9)]) + b[irand(0, 9)];
         std::string who;
         for (const Villager& v : villagers) if (v.alive) {
             if (!who.empty()) who += ", ";
             who += v.name;
             if (who.size() > 48) { who += "..."; break; }
         }
-        note("The town was founded by " + who + ".");
+        note(townName + " was founded by " + who + ".");
         for (const Villager& v : villagers) if (v.alive) pushChip(v, v.name);
     }
     popMark = population();
